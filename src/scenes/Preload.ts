@@ -18,9 +18,13 @@ export class PreloadScene extends Phaser.Scene {
 
     // --- collision layer
     const pieces = m.collision_layer.pieces;
+    const thin = this.cache.json.get('p2').thin ?? {};
     for (const name of Object.keys(pieces)) {
       const p = pieces[name];
-      this.load.image(name, A + p.file);
+      // phase 4: solid pieces are drawn/collide as their thick CORE; the thin bits (antennas, poles, pipes, cables)
+      // are separate breakable pieces '<name>_thin_<i>' that snap off without hurting the car
+      this.load.image(name, A + (thin[name]?.core ?? p.file));
+      (thin[name]?.thin ?? []).forEach((t: any, i: number) => this.load.image(`${name}_thin_${i}`, A + t.file));
       if (p.break) {
         this.load.spritesheet(name + '_break', A + p.break.file, { frameWidth: p.break.frame_size[0], frameHeight: p.break.frame_size[1] });
       }
@@ -40,6 +44,12 @@ export class PreloadScene extends Phaser.Scene {
       this.load.spritesheet(`${P}_flame`, A + g.file, { frameWidth: g.frame_size[0], frameHeight: g.frame_size[1] });
       const df = p2[d].driver_frame ?? [14, 16];
       this.load.spritesheet(`${P}_driver`, F + 'driver_sheet.png', { frameWidth: df[0], frameHeight: df[1] });
+    }
+    // phase 4: gas barrels (generated art) + HUD damage icon (64x36 = exact 20:1 box of the side masters)
+    this.load.spritesheet('barrel', A + 'barrel_sheet.png', { frameWidth: p2.barrel.frame[0], frameHeight: p2.barrel.frame[1] });
+    for (const d of DRIVERS) {
+      for (const sec of SECTIONS) for (let l = 0; l <= 3; l++) this.load.image(`hud_${d}_${sec}_${l}`, A + `hud_${d}/${sec}_${l}.png`);
+      for (const q of ['rear_engine', 'front_gear']) this.load.image(`hud_${d}_${q}`, A + `hud_${d}/${q}.png`);
     }
     this.load.spritesheet('scrap', A + 'scrap_sheet.png', { frameWidth: p2.scrap.frame[0], frameHeight: p2.scrap.frame[1] });
     // distant towers (note 14 previews) and the graffiti near wall (note 2), generated art
@@ -117,6 +127,7 @@ export class PreloadScene extends Phaser.Scene {
     }
     for (const d of DRIVERS) seq(`${carPrefix(d)}_flame`, 6, 70);
     // scrap pickups: 4 variants, each idles then glints
+    for (let v = 0; v < 4; v++) a.create({ key: `barrel_${v}`, frames: [{ key: 'barrel', frame: v * 2, duration: 1100 }, { key: 'barrel', frame: v * 2 + 1, duration: 160 }], repeat: -1 });
     for (let v = 0; v < 4; v++) a.create({ key: `scrap_${v}`, frames: [{ key: 'scrap', frame: v * 2, duration: 900 }, { key: 'scrap', frame: v * 2 + 1, duration: 140 }], repeat: -1 });
     for (const k of ['drone_security', 'drone_gang']) { seq(k + '_fly', 4, 40); seq(k + '_break', 6, 70, 0); }
     for (const t of Object.values(this.cache.json.get('p2').traffic) as any[]) seq(t.key + '_break', 6, 70, 0);

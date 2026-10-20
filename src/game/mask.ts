@@ -30,3 +30,6 @@ export function solidAt(m: Mask, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= m.w || y >= m.h) return false;
   return m.a[y * m.w + x] === 1;
 }
+
+/** Forget a cached mask (canvas textures such as p2_sil_N are re-created with the same key after a restart). */
+export function dropMask(key: string) { cache.delete(key); }

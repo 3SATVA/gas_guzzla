@@ -1,23 +1,26 @@
 import Phaser from 'phaser';
 import { applyHit, sectionDrawOrder, sectionKey, SECTIONS, carPrefix, currentDriver, Driver } from '../game/damage';
-import { maskOf, solidAt, Mask } from '../game/mask';
+import { maskOf, solidAt, Mask, dropMask } from '../game/mask';
 import { Rng } from '../game/rng';
 import type { HudScene } from './Hud';
 
 // Gameplay is authored at 360 rows and drawn at 2x (camera zoom 2). The view is VW wide (640..840, follows the
 // screen aspect) and the camera now follows the car vertically through a world that is 2 screens tall:
-//   y -360..-170  traffic band (Tesla lanes, tops of the towers)
+//   y -540..-360  TRAFFIC CEILING (phase 4): lanes get denser / faster / gapless toward the top = no way over it
+//   y -360..-170  traffic band (Tesla lanes with Frogger gaps, tops of the towers)
 //   y -170..100   middle band (tunnels through black silhouette blocks, skybridges, gaps)
 //   y  100..200+  street band (dense breakables / debris, best scrap)
 let VW = 640;
-const VH = 360, TOP_Y = -360;
+const VH = 360, TOP_Y = -540, BAND_TOP = -360;
 const GROUND_Y = 200;
 const CAR_W = 128, CAR_H = 72, CAR_CX = 64, CAR_CY = 36;
 const RIG_W = 176, RIG_H = 104, RIG_CX = 88, RIG_CY = 52;
 const MAX_SPEED = 150, START_SPEED = 95, REV_SPEED = -MAX_SPEED / 3;
 const M = 40;
-// note 5: small Teslas in many lanes, both directions, busiest high up (p = chance a slot is filled)
-const LANES = [
+// note 5: small Teslas in many lanes, both directions, busiest high up (p = chance a slot is filled).
+// g = spacing inside a platoon, pg = Frogger gap between platoons, n = platoon size.
+interface Lane { y: number; v: number; p: number; g: [number, number]; pg: [number, number]; n: [number, number]; ceil: boolean; }
+const BASE_LANES: Lane[] = [
   { y: -346, v: -150, p: 0.85 }, // oncoming (faces left)
   { y: -324, v: 74, p: 0.8 },    // same direction (faces right)
   { y: -302, v: -126, p: 0.75 },
@@ -25,14 +28,40 @@ const LANES = [
   { y: -256, v: -108, p: 0.5 },
   { y: -228, v: 86, p: 0.3 },
   { y: -192, v: -96, p: 0.15 },
-];
+].map((l) => ({ ...l, g: [74, 104] as [number, number], pg: [230, 400] as [number, number], n: [2, 4] as [number, number], ceil: false }));
+// phase 4 TRAFFIC CEILING: 10 more lanes stacked every 18 px above the old top (Teslas are 16 px tall). Going up, every
+// lane is fuller, faster and tighter, and the Frogger gaps shrink below the car's length -> a solid wall at the top.
+const CEIL_LANES: Lane[] = Array.from({ length: 10 }, (_, i) => {
+  const t = i / 9, lerp = (a: number, b: number) => Math.round(a + (b - a) * t);
+  return {
+    y: -366 - i * 18, v: (i % 2 ? 1 : -1) * lerp(165, 290), p: 0.9 + 0.1 * t,
+    g: [lerp(70, 60), lerp(86, 64)] as [number, number], pg: [lerp(150, 60), lerp(210, 70)] as [number, number],
+    n: [lerp(3, 8), lerp(5, 12)] as [number, number], ceil: true,
+  };
+});
+const LANES: Lane[] = [...BASE_LANES, ...CEIL_LANES];
+// phase 4 GAS (units: tank = 100)
+const GAS_MAX = 100, GAS_BASE = 0.9, GAS_BOOST = 0.9, GAS_CLIMB = 1.6, GAS_LOW = 25;
+const BARREL_GAP: [number, number] = [1100, 1700];
+// phase 4 drones: fewer
+const DRONE_MAX = 2, DRONE_EVERY: [number, number] = [5.5, 8.5], DRONE_FIRST = 6;
 const SHOP_FIRST = 2400, SHOP_EVERY = 5600, SHOP_W = 236;
 
-type Kind = 'solid' | 'breakable';
+/** Obstacle tags (phase 4):
+ *   'solid'     HURTS  - thick walls / buildings / overhang decks / black silhouette blocks / the street
+ *   'breakable' SAFE   - street props from the manifest (billboard, antenna mast, hanging sign, signal tower, street
+ *                         sign, thin wall/fence, cable span): smash through them, the car takes NO damage
+ *   'thin'      SAFE   - thin bits (antenna, pole, pipe, cable, wire): they SNAP, spark and fall away, NO damage
+ *  Drones and Tesla traffic (not obstacles) also HURT. */
+type Kind = 'solid' | 'breakable' | 'thin';
+type ThinKind = 'antenna' | 'pole' | 'pipe' | 'cable' | 'wire';
 interface Obstacle {
   kind: Kind; name: string; x: number; y: number; w: number; h: number;
   img: Phaser.GameObjects.Image | null; mask: Mask | null; broken: boolean; tall?: boolean;
+  thin?: ThinKind; key?: string; parent?: Obstacle;
 }
+interface Barrel { spr: Phaser.GameObjects.Sprite; glow: Phaser.GameObjects.Image; wx: number; y: number; value: number; taken: boolean; zone: string; ph: number; }
+interface Falling { spr: Phaser.GameObjects.Image | Phaser.GameObjects.Rectangle; x: number; y: number; vx: number; vy: number; vr: number; g: number; life: number; life0: number; }
 type DType = 'security' | 'gang';
 interface Drone { type: DType; spr: Phaser.GameObjects.Sprite; wx: number; y: number; vx: number; vy: number; hp: number; mode: 'chase' | 'scrap' | 'flee'; target?: Scrap; w: number; h: number; dead: boolean; t: number; stun: number; }
 interface Traffic { spr: Phaser.GameObjects.Image; key: string; lane: number; wx: number; y: number; v: number; w: number; h: number; dead: boolean; margin: number; }
@@ -61,6 +90,8 @@ export class LevelScene extends Phaser.Scene {
   particles: Particle[] = [];
   previews: Preview[] = [];
   shops: Shop[] = [];
+  barrels: Barrel[] = []; falling: Falling[] = []; nextBarrel = 900;
+  gas = GAS_MAX; dry = 0; dead: 'wreck' | 'gas' = 'wreck';
   nextX = 0; nextDrone = 0; nextShop = SHOP_FIRST; texN = 0;
   laneState = LANES.map(() => ({ gap: 0, left: 0 }));
   // player rig
@@ -92,7 +123,7 @@ export class LevelScene extends Phaser.Scene {
   autopilot: ((s: LevelScene) => { ix: number; iy: number }) | null = null;
   debug = false;
   dbg!: Phaser.GameObjects.Graphics;
-  stats = { smashed: 0, broken: 0, hits: 0, grabbed: 0, stolen: 0, droneWall: 0 };
+  stats = { smashed: 0, broken: 0, hits: 0, grabbed: 0, stolen: 0, droneWall: 0, snapped: 0, barrels: 0 };
   noSpawn = false; noEnemies = false;
   lastIx = 0;
 
@@ -118,8 +149,10 @@ export class LevelScene extends Phaser.Scene {
     this.scrap = Number(this.registry.get('scrap') ?? 0);
     this.invuln = 0; this.hitStop = 0; this.state = 'play'; this.totaledT = 0;
     this.sx = 70; this.py = 100; this.vx = 0; this.vy = 0; this.tilt = 0;
-    this.stats = { smashed: 0, broken: 0, hits: 0, grabbed: 0, stolen: 0, droneWall: 0 };
-    this.nextX = 700; this.nextDrone = 2.5; this.nextShop = SHOP_FIRST;
+    this.stats = { smashed: 0, broken: 0, hits: 0, grabbed: 0, stolen: 0, droneWall: 0, snapped: 0, barrels: 0 };
+    this.nextX = 700; this.nextDrone = DRONE_FIRST; this.nextShop = SHOP_FIRST;
+    this.barrels = []; this.falling = []; this.nextBarrel = 900; this.gas = GAS_MAX; this.dry = 0; this.dead = 'wreck';
+    if (q.get('gas')) this.gas = Phaser.Math.Clamp(Number(q.get('gas')), 0, GAS_MAX);
     this.laneState = LANES.map(() => ({ gap: 0, left: this.rng.int(2, 4) }));
     this.arm = { st: 'idle', t: 0, dur: 0.3, target: null };
     this.anims.globalTimeScale = 1;
@@ -196,7 +229,12 @@ export class LevelScene extends Phaser.Scene {
 
     this.generateUntil(VW + 500);
     (window as any).__gg.level = this;
-    this.time.delayedCall(50, () => { this.hud?.setLevels(this.levels); this.hud?.setScrap(this.scrap); });
+    this.time.delayedCall(50, () => { this.hud?.setLevels(this.levels); this.hud?.setScrap(this.scrap); this.hud?.setGas(this.gas, GAS_MAX, false); });
+    if (!this.textures.exists('p4_glow')) {
+      const ct = this.textures.createCanvas('p4_glow', 20, 8)!; const g = ct.getContext(); const im = g.createImageData(20, 8);
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 20; x++) { const dx = (x - 9.5) / 9.5, dy = (y - 3.5) / 3.5, a = Math.max(0, 1 - (dx * dx + dy * dy)); const i = (y * 20 + x) * 4; im.data[i] = 255; im.data[i + 1] = 176; im.data[i + 2] = 72; im.data[i + 3] = Math.round(200 * a * a); }
+      g.putImageData(im, 0, 0); ct.refresh();
+    }
     if (q.get('scene') === 'shop' && !this.registry.get('shopOpened')) { this.registry.set('shopOpened', true); this.time.delayedCall(400, () => this.openShop()); }
   }
 
@@ -326,38 +364,80 @@ export class LevelScene extends Phaser.Scene {
     const img = this.add.image(Math.round(x), Math.round(y), name).setOrigin(0).setDepth(depth);
     const o: Obstacle = { kind: p.tag, name, x: Math.round(x), y: Math.round(y), w: p.size[0], h: p.size[1], img, mask: maskOf(this, name), broken: false };
     this.obstacles.push(o);
+    const th = this.p2.thin?.[name]?.thin as any[] | undefined;
+    th?.forEach((t, i) => {
+      const key = `${name}_thin_${i}`;
+      const kind: ThinKind = t.kind === 'pole' ? (t.y < 12 ? 'antenna' : 'pole') : t.kind;
+      this.addThin(key, o.x + t.x, o.y + t.y, t.w, t.h, kind, depth, o);
+    });
     return o;
+  }
+  addThin(key: string, x: number, y: number, w: number, h: number, kind: ThinKind, depth: number, parent?: Obstacle): Obstacle {
+    const img = this.add.image(Math.round(x), Math.round(y), key).setOrigin(0).setDepth(depth);
+    const o: Obstacle = { kind: 'thin', name: key, key, x: Math.round(x), y: Math.round(y), w, h, img, mask: maskOf(this, key), broken: false, thin: kind, parent };
+    this.obstacles.push(o);
+    return o;
+  }
+  /** procedural black thin bit (roof antenna, tunnel cable / wire) on its own canvas so it can snap off on its own */
+  addThinProc(x: number, y: number, w: number, h: number, kind: ThinKind, draw: (g: CanvasRenderingContext2D) => void, depth = 11) {
+    const key = `p2_sil_${this.texN++}`;
+    if (this.textures.exists(key)) this.textures.remove(key);
+    dropMask(key);
+    const ct = this.textures.createCanvas(key, w, h)!; const g = ct.getContext(); g.fillStyle = '#000'; draw(g); ct.refresh();
+    ct.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    return this.addThin(key, x, y, w, h, kind, depth);
   }
   /** Pure black silhouette block (tower / tunnel / skybridge deck) drawn into its own canvas; the alpha is the collision mask. */
   addSilhouette(x: number, y: number, w: number, h: number, passages: { y0: number; y1: number }[], roof = true): Obstacle {
     const key = `p2_sil_${this.texN++}`;
+    if (this.textures.exists(key)) this.textures.remove(key);
+    dropMask(key);
     const ct = this.textures.createCanvas(key, w, h)!;
     const g = ct.getContext();
     g.fillStyle = '#000';
     const r = this.rng;
-    // jagged roof line with antennas / tanks
+    const X = Math.round(x), Y = Math.round(y);
+    const thins: (() => void)[] = [];
+    // jagged roof line; the antennas on it are THIN (they snap off, no damage)
     let cx = 0;
     while (cx < w) {
       const seg = Math.min(w - cx, r.int(10, 34));
       const top = roof ? r.int(0, 10) : 0;
       g.fillRect(cx, top + 8, seg, h);
-      if (roof && r.chance(0.25)) g.fillRect(cx + r.int(1, Math.max(1, seg - 3)), 0, 2, top + 9);
+      if (roof && r.chance(0.3)) {
+        const ax = cx + r.int(1, Math.max(1, seg - 3)), ah = top + 9 + r.int(0, 14), cross = r.chance(0.5);
+        thins.push(() => this.addThinProc(X + ax - 3, Y + top + 9 - ah, 8, ah, 'antenna', (q) => {
+          q.fillRect(3, 0, 2, ah); if (cross) { q.fillRect(0, 3, 8, 1); q.fillRect(1, 7, 6, 1); }
+        }));
+      }
       cx += seg;
     }
-    // passages (tunnels): carve with ragged edges + hanging cables
+    // passages (tunnels): carve with ragged edges; hanging cables + sagging wires across are THIN
     for (const p of passages) {
       for (let px = 0; px < w; px += 3) {
         const a = p.y0 + r.int(-2, 2), b = p.y1 + r.int(-2, 2);
         g.clearRect(px, a, 3, b - a);
       }
       g.clearRect(0, p.y0 + 3, w, p.y1 - p.y0 - 6);
-      for (let k = 0; k < Math.floor(w / 60); k++) { const hx = r.int(8, w - 8); g.fillRect(hx, p.y0, 1, r.int(4, 12)); }
+      for (let k = 0; k < Math.floor(w / 60); k++) {
+        const hx = r.int(8, w - 8), hl = r.int(6, 16);
+        thins.push(() => this.addThinProc(X + hx - 1, Y + p.y0 + 1, 3, hl + 2, 'cable', (q) => { q.fillRect(1, 0, 1, hl); q.fillRect(0, hl, 3, 2); }));
+      }
+      // sagging power / data wires strung across the tunnel
+      for (let k = 0; k < Math.floor(w / 140); k++) {
+        const ww = r.int(50, 90), wx0 = r.int(10, Math.max(11, w - ww - 10)), sag = r.int(4, 12), wy = p.y0 + r.int(6, 18);
+        thins.push(() => this.addThinProc(X + wx0, Y + wy, ww, sag + 3, 'wire', (q) => {
+          for (let i = 0; i < ww; i++) { const u = i / (ww - 1); q.fillRect(i, Math.round(4 * sag * u * (1 - u)), 1, 1); }
+          q.fillRect(0, 0, 2, 2); q.fillRect(ww - 2, 0, 2, 2);
+        }));
+      }
     }
     ct.refresh();
     ct.setFilter(Phaser.Textures.FilterMode.NEAREST);
     const img = this.add.image(Math.round(x), Math.round(y), key).setOrigin(0).setDepth(11);
     const o: Obstacle = { kind: 'solid', name: key, x: Math.round(x), y: Math.round(y), w, h, img, mask: maskOf(this, key), broken: false, tall: true };
     this.obstacles.push(o);
+    for (const t of thins) t();
     return o;
   }
   addBuilding(x: number, name?: string): Obstacle | null {
@@ -488,7 +568,84 @@ export class LevelScene extends Phaser.Scene {
         used = q.x + q.w - x;
       }
       this.nextX = x + used + this.rng.int(60, 170);
+      while (this.nextBarrel < this.nextX - 40) { this.placeBarrel(this.nextBarrel); this.nextBarrel += this.rng.int(BARREL_GAP[0], BARREL_GAP[1]); }
     }
+  }
+
+  // ------------------------------------------------------------------ gas barrels (phase 4): risk / reward by height band
+  blockedAt(x: number, y: number) {
+    if (y >= this.groundTopAt(x) - 4) return true;
+    for (const o of this.obstacles) {
+      if (o.kind !== 'solid' || !o.mask || x < o.x - 12 || x > o.x + o.w + 12 || y < o.y - 14 || y > o.y + o.h + 14) continue;
+      for (const [dx, dy] of [[0, 0], [-10, -12], [10, -12], [-10, 12], [10, 12], [0, -14], [0, 14]]) if (solidAt(o.mask, x + dx - o.x, y + dy - o.y)) return true;
+    }
+    return false;
+  }
+  placeBarrel(x: number) {
+    // zone weights: ceiling (deadly, big refill) / traffic lanes (risky) / mid air + tunnels / street (safe, small)
+    const zones: [string, number, number, number, number][] = [
+      ['ceiling', 0.1, -430, -372, 60], ['traffic', 0.27, -340, -200, 45], ['mid', 0.33, -150, 60, 30], ['street', 0.3, 100, 170, 25],
+    ];
+    let r = this.rng.next();
+    let zi = zones.findIndex((z) => (r -= z[1]) < 0); if (zi < 0) zi = 2;
+    for (let tries = 0; tries < 24; tries++) {
+      const z = zones[(zi + Math.floor(tries / 6)) % zones.length];
+      const xx = x + this.rng.int(-60, 60);
+      const yy = z[0] === 'street' ? this.groundTopAt(xx) - this.rng.int(22, 46) : this.rng.int(z[2], z[3]);
+      if (this.blockedAt(xx, yy)) continue;
+      this.addBarrel(xx, yy, z[4], z[0]);
+      return;
+    }
+  }
+  addBarrel(wx: number, y: number, value: number, zone: string) {
+    const v = this.rng.int(0, 3);
+    const glow = this.add.image(Math.round(wx), Math.round(y + 10), 'p4_glow').setOrigin(0.5).setDepth(13).setBlendMode(Phaser.BlendModes.ADD);
+    const spr = this.add.sprite(Math.round(wx), Math.round(y), 'barrel', v * 2).setOrigin(0.5).setDepth(14);
+    spr.play({ key: `barrel_${v}`, startFrame: this.rng.int(0, 1) });
+    const b: Barrel = { spr, glow, wx, y, value, taken: false, zone, ph: this.rng.range(0, 6.28) };
+    this.barrels.push(b);
+    return b;
+  }
+  updateBarrels() {
+    const cx = Math.round(this.px), cy = Math.round(this.py);
+    for (const b of this.barrels) {
+      if (b.taken) continue;
+      const vis = b.wx > this.scroll - 40 && b.wx < this.scroll + VW + 40;
+      b.spr.setVisible(vis); b.glow.setVisible(vis);
+      if (!vis) continue;
+      const bob = Math.round(Math.sin(this.elapsed * 2.6 + b.ph) * 2);
+      b.spr.setPosition(Math.round(b.wx), Math.round(b.y) + bob);
+      b.glow.setPosition(Math.round(b.wx), Math.round(b.y) + 11 + bob).setAlpha(0.45 + 0.25 * Math.sin(this.elapsed * 7 + b.ph));
+      if (this.state !== 'play') continue;
+      if (cx + this.carBox.x1 < b.wx - 7 || cx + this.carBox.x0 > b.wx + 7) continue;
+      if (this.contactWithRect(b.wx - 7, b.y - 9, 14, 18).n) this.takeBarrel(b);
+    }
+  }
+  takeBarrel(b: Barrel) {
+    b.taken = true; this.stats.barrels++;
+    const was = this.gas;
+    this.gas = Math.min(GAS_MAX, this.gas + b.value);
+    if (this.dry) { this.dry = 0; this.flame.setVisible(true); }
+    this.tweens.add({ targets: [b.spr, b.glow], y: '-=10', alpha: 0, duration: 220, onComplete: () => { b.spr.destroy(); b.glow.destroy(); } });
+    this.floatText(b.wx, b.y - 12, `+${Math.round(this.gas - was)} GAS`, '#ffb347');
+    this.hud?.setGas(this.gas, GAS_MAX, false, true);
+  }
+  /** empty tank: the sinking car hits the street / a wall and wrecks (game over) */
+  gasCrash(c: Contact | null) {
+    if (c && c.n) this.spark(Math.round(this.px) + c.sx / c.n, Math.round(this.py) + c.sy / c.n);
+    this.levels = [3, 3, 3]; this.applySectionTextures(); this.hud?.setLevels(this.levels);
+    this.hud?.setGas(0, GAS_MAX, true);
+    this.totaled('gas');
+  }
+  /** fuel burn per second: idle/cruise + boosting (holding right) + climbing (scaled by climb rate) */
+  burnGas(dt: number, ix: number) {
+    const climb = Math.max(0, -this.vy / 170);
+    const rate = GAS_BASE + (ix > 0 ? GAS_BOOST : 0) + GAS_CLIMB * climb;
+    this.gas = Math.max(0, this.gas - rate * dt);
+    if (this.gas <= 0 && !this.dry) { this.dry = 0.001; this.floatText(this.px + CAR_CX, this.py - 4, 'OUT OF GAS!', '#ff6a5a'); this.hud?.flash(0.25); }
+    if (this.dry) this.dry += dt;
+    if (this.dry > 9 && this.state === 'play') this.gasCrash(null);
+    this.hud?.setGas(this.gas, GAS_MAX, this.dry > 0);
   }
 
   // ------------------------------------------------------------------ drones (note 8, 10, 11, 13, 24)
@@ -498,7 +655,7 @@ export class LevelScene extends Phaser.Scene {
     const key = `drone_${type}`;
     const h = type === 'gang' ? 26 : 21;
     const wx = behind ? this.scroll - 110 : this.scroll + VW + 20;
-    const y = Phaser.Math.Clamp(this.py + this.rng.int(-70, 70), TOP_Y + 10, 200);
+    const y = Phaser.Math.Clamp(this.py + this.rng.int(-70, 70), BAND_TOP + 10, 200);
     const spr = this.add.sprite(0, 0, key + '_fly', 0).setOrigin(0).setDepth(20);
     spr.play({ key: key + '_fly', startFrame: this.rng.int(0, 3) });
     const d: Drone = { type, spr, wx, y, vx: behind ? this.speed + 40 : -60, vy: 0, hp: type === 'gang' ? 2 : 1, mode: 'chase', w: 95, h, dead: false, t: 0, stun: 0 };
@@ -516,7 +673,7 @@ export class LevelScene extends Phaser.Scene {
     const maxS = gang ? 235 : 185, acc = gang ? 250 : 190;
     let tx: number, ty: number;
     if (d.mode === 'scrap' && d.target && !d.target.taken) { tx = d.target.wx; ty = d.target.y; }
-    else if (d.mode === 'flee') { tx = d.wx + 400; ty = TOP_Y - 80; }
+    else if (d.mode === 'flee') { tx = d.wx + 400; ty = BAND_TOP - 80; }
     else {
       d.mode = 'chase';
       // lead the player by 0.6 s of their current motion: a sudden hover stop makes them overshoot (note 10)
@@ -575,8 +732,11 @@ export class LevelScene extends Phaser.Scene {
 
   // ------------------------------------------------------------------ traffic (note 5, 7, 12)
   updateTraffic(dt: number) {
+    const camTop = this.camY - 60, camBot = this.camY + VH + 60;
     LANES.forEach((ln, i) => {
       const st = this.laneState[i];
+      // ceiling lanes far off-screen (below the camera) do not need cars yet; they fill in as soon as you climb
+      if (ln.ceil && (ln.y < camTop - 200 || ln.y > camBot)) { this.traffic.filter((c) => c.lane === i).forEach((c) => { c.spr.destroy(); c.dead = true; }); return; }
       const spawnX = ln.v < 0 || this.speed > ln.v ? this.scroll + VW + 30 : this.scroll - 80;
       const lane = this.traffic.filter((c) => c.lane === i && !c.dead);
       const last = lane.length ? lane.reduce((a, b) => (Math.abs(b.wx - spawnX) < Math.abs(a.wx - spawnX) ? b : a)) : null;
@@ -588,8 +748,8 @@ export class LevelScene extends Phaser.Scene {
         }
         // platoons with Frogger gaps between them (note 12)
         st.left--;
-        if (st.left <= 0) { st.left = this.rng.int(2, 4); st.gap = this.rng.int(230, 400); }
-        else st.gap = this.rng.int(74, 104);
+        if (st.left <= 0) { st.left = this.rng.int(ln.n[0], ln.n[1]); st.gap = this.rng.int(ln.pg[0], ln.pg[1]); }
+        else st.gap = this.rng.int(ln.g[0], ln.g[1]);
       }
     });
     for (const c of this.traffic) {
@@ -686,6 +846,57 @@ export class LevelScene extends Phaser.Scene {
     this.cameras.main.shake(shakeMs, intensity, true);
   }
 
+  /** THIN obstacles: snap at the contact point, both halves spin and fall away, electric sparks. No damage. */
+  snapThin(o: Obstacle, c: Contact) {
+    o.broken = true; o.img?.setVisible(false); this.stats.snapped++;
+    const wx = Math.round(this.px) + c.sx / c.n, wy = Math.round(this.py) + c.sy / c.n;
+    const key = o.key ?? o.name;
+    const horiz = o.w > o.h;
+    const cut = horiz ? Phaser.Math.Clamp(Math.round(wx - o.x), 1, o.w - 1) : Phaser.Math.Clamp(Math.round(wy - o.y), 1, o.h - 1);
+    const halves: [number, number, number, number][] = horiz ? [[0, 0, cut, o.h], [cut, 0, o.w - cut, o.h]] : [[0, 0, o.w, cut], [0, cut, o.w, o.h - cut]];
+    halves.forEach(([hx, hy, hw, hh], i) => {
+      if (hw <= 0 || hh <= 0) return;
+      const spr = this.add.image(o.x, o.y, key).setOrigin(0).setDepth(16).setCrop(hx, hy, hw, hh);
+      // rotate around the middle of the kept half
+      spr.setOrigin((hx + hw / 2) / o.w, (hy + hh / 2) / o.h);
+      const px0 = o.x + hx + hw / 2, py0 = o.y + hy + hh / 2;
+      const away = horiz ? (i === 0 ? -1 : 1) : 1;
+      this.falling.push({ spr, x: px0, y: py0, vx: this.speed * 0.55 + away * this.rng.range(10, 50), vy: this.rng.range(-110, -40), vr: (i ? 1 : -1) * this.rng.range(240, 620), g: 620, life: 1.4, life0: 1.4 });
+    });
+    this.spark(wx, wy, 41);
+    for (let i = 0; i < 12; i++) {
+      const col = this.rng.chance(0.5) ? 0xfff2a0 : this.rng.chance(0.5) ? 0x9fe8ff : 0xffb347;
+      const spr = this.add.rectangle(wx, wy, 1, 1, col).setOrigin(0).setDepth(42);
+      this.falling.push({ spr, x: wx, y: wy, vx: this.speed * 0.4 + this.rng.range(-120, 160), vy: this.rng.range(-170, 40), vr: 0, g: 420, life: this.rng.range(0.2, 0.5), life0: 0.5 });
+    }
+    this.burst('black_shards', wx, wy, 3, this.speed + 30, 70, 16);
+    if (this.rng.chance(0.6)) this.floatText(wx, wy - 8, this.rng.pick(['SNAP!', 'SNAP!', 'ZZT!', 'CRACK!']), '#9fe8ff');
+    this.speed *= 0.985;
+    this.impact(18, 70, 0.0025);
+  }
+  updateFalling(dt: number) {
+    this.falling = this.falling.filter((f) => {
+      f.life -= dt; f.vy += f.g * dt; f.x += f.vx * dt; f.y += f.vy * dt;
+      f.spr.setPosition(Math.round(f.x), Math.round(f.y));
+      if (f.vr) (f.spr as Phaser.GameObjects.Image).setAngle(((f.spr as Phaser.GameObjects.Image).angle + f.vr * dt));
+      f.spr.setAlpha(Math.min(1, f.life / Math.min(0.35, f.life0)));
+      if (f.life <= 0 || f.y > VH + 30) { f.spr.destroy(); return false; }
+      return true;
+    });
+  }
+  /** contact for 1-2 px wide bits: probe each car point and its 2x2 neighbourhood (car points are sampled every 2 px) */
+  contactThin(o: Obstacle): Contact {
+    const cx = Math.round(this.px), cy = Math.round(this.py);
+    const c: Contact = { n: 0, sx: 0, sy: 0 };
+    if (!o.mask) return c;
+    if (cx + this.carBox.x1 < o.x || cx + this.carBox.x0 > o.x + o.w || cy + this.carBox.y1 < o.y || cy + this.carBox.y0 > o.y + o.h) return c;
+    for (const p of this.carPts) {
+      const X = cx + p.x - o.x, Y = cy + p.y - o.y;
+      if (solidAt(o.mask, X, Y) || solidAt(o.mask, X + 1, Y) || solidAt(o.mask, X, Y + 1) || solidAt(o.mask, X + 1, Y + 1)) { c.n++; c.sx += p.x; c.sy += p.y; }
+    }
+    return c;
+  }
+
   // ------------------------------------------------------------------ events
   breakPiece(o: Obstacle, c: Contact) {
     o.broken = true;
@@ -696,7 +907,7 @@ export class LevelScene extends Phaser.Scene {
     const wx = Math.round(this.px) + c.sx / c.n, wy = Math.round(this.py) + c.sy / c.n;
     this.spark(wx, wy);
     this.burst('black_shards', wx + 6, wy, 14, this.speed + 60, 120, 16);
-    this.speed *= 0.8;
+    this.speed *= 0.88;
     this.impact(45, 110, 0.004);
     this.stats.broken++;
   }
@@ -707,7 +918,8 @@ export class LevelScene extends Phaser.Scene {
     this.applySectionTextures();
     this.stats.hits++;
     this.spark(Math.round(this.px) + lx, Math.round(this.py) + c.sy / c.n);
-    this.invuln = 1.15;
+    // in the traffic ceiling the grace period is short, so camping up there totals you fast
+    this.invuln = this.py < BAND_TOP ? 0.55 : 1.15;
     this.impact(solid ? 95 : 80, 220, 0.013);
     this.hud?.flash();
     this.car.setTintFill(0xffffff);
@@ -717,7 +929,8 @@ export class LevelScene extends Phaser.Scene {
     this.seatFace = 2; this.seatT = 0.7; // note 25: arm up on hits
     if (res.totaled) this.totaled();
   }
-  totaled() {
+  totaled(why: 'wreck' | 'gas' = 'wreck') {
+    this.dead = why;
     this.state = 'totaled';
     this.totaledT = 0;
     this.deadVy = -60;
@@ -732,7 +945,7 @@ export class LevelScene extends Phaser.Scene {
     this.time.delayedCall(30, () => this.cameras.main.shake(650, 0.014, true));
     this.hud?.flash(0.8);
     this.registry.set('levels', [0, 0, 0]);
-    this.time.delayedCall(1300, () => this.hud?.showTotaled());
+    this.time.delayedCall(1300, () => this.hud?.showTotaled(why));
   }
 
   // ------------------------------------------------------------------ body shop (phase 2 mockup)
@@ -792,11 +1005,13 @@ export class LevelScene extends Phaser.Scene {
       this.updateTraffic(dt);
       this.nextDrone -= dt;
       if (this.nextDrone <= 0) {
-        this.spawnDrone();
-        const k = Math.max(0.55, 1 - this.elapsed / 180);
-        this.nextDrone = this.rng.range(2.2, 4.2) * k;
+        if (this.drones.filter((d) => !d.dead).length < DRONE_MAX) this.spawnDrone();
+        const k = Math.max(0.75, 1 - this.elapsed / 240);
+        this.nextDrone = this.rng.range(DRONE_EVERY[0], DRONE_EVERY[1]) * k;
       }
     }
+    this.updateBarrels();
+    this.updateFalling(dt);
     for (const d of this.drones) if (!d.dead) this.updateDrone(d, dt);
     this.drones = this.drones.filter((d) => {
       if (d.dead) return false;
@@ -829,11 +1044,19 @@ export class LevelScene extends Phaser.Scene {
   }
 
   updatePlayer(dt: number) {
-    const { ix, iy } = this.readInput();
+    const inp = this.readInput();
+    const ix = inp.ix;
+    let iy = inp.iy;
+    this.burnGas(dt, ix);
+    // OUT OF GAS: no lift. You can still steer down, but the car sinks, sputters and loses speed until it crashes
+    if (this.dry) {
+      iy = Math.max(iy, 0.45 + Math.min(0.55, this.dry * 0.2));
+      this.speed += (Math.min(this.speed, 40) - this.speed) * (1 - Math.exp(-dt * 0.8));
+    }
     // ---- notes 4 + 27: throttle. Right = faster, left = slow down to a full hover stop (it locks there for a beat),
     //      keep holding left to reverse at 1/3 speed, all the way back to the start. Releasing keeps the current speed.
     const backL = this.levels[0];
-    if (ix > 0) { this.speed = Math.min(MAX_SPEED, this.speed + (this.speed < 0 ? 260 : 120) * ix * dt); this.hoverLock = 0; }
+    if (ix > 0 && !this.dry) { this.speed = Math.min(MAX_SPEED, this.speed + (this.speed < 0 ? 260 : 120) * ix * dt); this.hoverLock = 0; }
     else if (ix < 0) {
       if (this.speed > 0) { this.speed = Math.max(0, this.speed + 200 * ix * dt); if (this.speed === 0) this.hoverLock = 0.45; }
       else if (this.hoverLock > 0) this.hoverLock -= dt;
@@ -853,6 +1076,7 @@ export class LevelScene extends Phaser.Scene {
 
     // ---- solids: damage + push out toward open air
     const { c } = this.solidContacts();
+    if (c.n && this.dry) { this.gasCrash(c); return; }
     if (c.n) {
       // push out toward the nearest open air (up over it, or down under a ceiling / into a tunnel passage)
       let dir = 0;
@@ -877,10 +1101,11 @@ export class LevelScene extends Phaser.Scene {
     }
     if (this.state !== 'play') return;
 
-    // ---- breakables
+    // ---- breakables + thin bits (never damage the car)
     const x0 = this.px - 10, x1 = this.px + CAR_W + 10;
     for (const o of this.obstacles) {
-      if (o.kind !== 'breakable' || o.broken || o.x > x1 || o.x + o.w < x0) continue;
+      if (o.kind === 'solid' || o.broken || o.x > x1 || o.x + o.w < x0) continue;
+      if (o.kind === 'thin') { const tc = this.contactThin(o); if (tc.n) this.snapThin(o, tc); continue; }
       const bc = this.contactWithMask(o);
       if (bc.n > 1) this.breakPiece(o, bc);
     }
@@ -926,6 +1151,10 @@ export class LevelScene extends Phaser.Scene {
     this.seat.setFrame(this.seatFace);
     const bob = Math.round(Math.sin(this.elapsed * 2.4) * 1.2);
     this.flame.anims.timeScale = ix > 0 ? 1.7 : Math.abs(this.speed) < 5 ? 0.7 : 1;
+    // sputter: low gas = the flame coughs now and then; empty = it mostly dies
+    const sput = this.dry ? 0.72 : this.gas < GAS_LOW ? 0.12 * (1 - this.gas / GAS_LOW) + 0.03 : 0;
+    this.flame.setVisible(!(sput && this.rng.next() < sput));
+    if (this.dry && this.rng.chance(dt * 6)) this.burst('fx_debris', this.px + 8, this.py + 40, 1, this.speed - 60, 30, 29);
     this.drawCar(bob);
   }
 
@@ -1010,7 +1239,9 @@ export class LevelScene extends Phaser.Scene {
     const r = this.cp.section_x;
     g.lineStyle(1, 0xffff00, 0.8);
     for (const k of ['middle', 'front']) g.lineBetween(cx + r[k], cy + 14, cx + r[k], cy + 60);
-    for (const o of this.obstacles) { g.lineStyle(1, o.kind === 'solid' ? 0xff3030 : 0x30a0ff, o.broken ? 0.2 : 0.8); g.strokeRect(o.x, o.y, o.w, o.h); }
+    for (const o of this.obstacles) { g.lineStyle(1, o.kind === 'solid' ? 0xff3030 : o.kind === 'thin' ? 0x30ffe0 : 0x30a0ff, o.broken ? 0.2 : 0.8); g.strokeRect(o.x, o.y, o.w, o.h); }
+    g.lineStyle(1, 0xffb347, 0.9);
+    for (const b of this.barrels) if (!b.taken) g.strokeRect(b.wx - 7, b.y - 9, 14, 18);
     g.lineStyle(1, 0xff00ff, 0.9);
     for (const d of this.drones) g.strokeRect(d.wx + 25, d.y + 2, 46, d.h - 4);
     for (const t of this.traffic) g.strokeRect(t.wx + 3, t.y + 3, t.w - 6, t.h - 6);

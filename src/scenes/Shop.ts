@@ -10,11 +10,12 @@ const PARTS = [
   { id: 'gun', name: 'MACHINE GUN', cost: 400 },
 ];
 const REPAIR_COST = 15; // scrap hunnids per damage level
-const MARGIN = 24, GAP = 56;
+const MARGIN = 24, GAP = 56, FLOOR = 700;
 
-/** BODY SHOP mockup (phase 2). Authored at 1280x720 like the select screen: the approved 3/4 car layers are drawn
- *  1:1 (composited from the sectional damage layers for the current damage), the chosen driver stands next to the car
- *  at native size (approved idle sheet, never resampled). */
+/** BODY SHOP mockup. Authored at 1280x720 like the select screen, NO canvas widening / black bars (phase 4): the 3/4 car
+ *  layers come from assets/shop_fit/ (each made once from its cleaned master with a Lanczos downscale + light sharpen,
+ *  see p4/shop_fit.py) and are composited from the sectional damage layers; the chosen driver stands next to the car at
+ *  native size (approved idle sheet, never resampled). */
 export class ShopScene extends Phaser.Scene {
   driver: Driver = 'fade';
   view: View = 'front34';
@@ -26,7 +27,7 @@ export class ShopScene extends Phaser.Scene {
   slotBs: Phaser.GameObjects.Text[] = [];
   levels = [0, 0, 0];
   scrap = 0;
-  bbF: number[] = []; bbR: number[] = []; carLeft = 0; carSlotW = 0; W = 1280; restoreW = false; prevMinW = 0;
+  bbF: number[] = []; bbR: number[] = []; carLeft = 0; carSlotW = 0; W = 1280;
   drv!: Phaser.GameObjects.Sprite;
 
   constructor() { super('Shop'); }
@@ -41,29 +42,27 @@ export class ShopScene extends Phaser.Scene {
     this.load.once('complete', () => loadingT.destroy());
     const d = this.driver;
     for (const v of ['front34', 'rear34'] as View[]) {
-      const B = `assets/shop/${d}/${v}/`;
+      const B = `assets/shop_fit/${d}/${v}/`;
       for (const sec of SECTIONS) for (let l = 0; l <= 3; l++) {
-        const k = `shop_${d}_${v}_${sec}_${l}`;
+        const k = `shopfit_${d}_${v}_${sec}_${l}`;
         if (!this.textures.exists(k)) this.load.image(k, B + (l === 0 ? `body_sections/${sec}_0.png` : `damage/${sec}_${l}.png`));
       }
-      for (const p of ['rear_engine', 'front_gear']) { const k = `shop_${d}_${v}_${p}`; if (!this.textures.exists(k)) this.load.image(k, B + p + '.png'); }
+      for (const p of ['rear_engine', 'front_gear']) { const k = `shopfit_${d}_${v}_${p}`; if (!this.textures.exists(k)) this.load.image(k, B + p + '.png'); }
     }
   }
 
   create() {
-    // layout: [margin][native car, widest of both views][clear gap][native driver][margin]. When that does not fit the
-    // current canvas, the canvas is widened for the shop only (same CSS fit as everywhere, restored on CONTINUE).
+    // layout: [car (shrunk once from the masters to fit 1280)][clear gap][native driver], centred on the canvas.
+    if (!this.cache.json.exists('shopfit')) throw new Error('shopfit meta missing');
+    const fit = this.cache.json.get('shopfit')[this.driver];
     const sh = this.cache.json.get('p2').shop[this.driver];
-    this.bbF = sh.front34; this.bbR = sh.rear34;
+    this.bbF = fit.front34; this.bbR = fit.rear34;
     const carW = Math.max(this.bbF[2] - this.bbF[0], this.bbR[2] - this.bbR[0]);
     const db = sh.driver_bbox, drvW = db[2] - db[0];
-    const need = MARGIN + carW + GAP + drvW + MARGIN;
-    this.prevMinW = 0;
-    if (this.scale.width < need) { (window as any).__ggMinW?.(need); this.restoreW = true; }
-    const W = Math.max(this.scale.width, need);
-    this.W = W;
-    const left = Math.round((W - need) / 2);
-    this.carLeft = left + MARGIN; this.carSlotW = carW;
+    const W = this.scale.width; this.W = W;
+    const need = carW + GAP + drvW;
+    const left = Math.max(MARGIN, Math.round((W - need) / 2));
+    this.carLeft = left; this.carSlotW = carW;
     const cam = this.cameras.main;
     cam.setZoom(1).setBackgroundColor('#000').setScroll(0, 0);
     cam.fadeIn(250, 0, 0, 0);
@@ -72,10 +71,9 @@ export class ShopScene extends Phaser.Scene {
     // garage backdrop (approved select background, 1:1; mirrored copies fill the extra width)
     this.add.image(0, 0, 'sel_bg').setOrigin(0);
     this.add.image(1280, 0, 'sel_bg').setOrigin(0).setFlipX(true);
-    this.add.image(2560, 0, 'sel_bg').setOrigin(0);
-    this.add.rectangle(0, 0, Math.max(W, 2560), 720, 0x000000, 0.35).setOrigin(0);
+    this.add.rectangle(0, 0, 2560, 720, 0x000000, 0.35).setOrigin(0);
 
-    this.carLayer = this.add.container(0, 70);
+    this.carLayer = this.add.container(0, 0);
     this.drawCar();
     // driver beside the car with clear space (native, approved idle sheet, never resampled)
     const idle = this.driver === 'fade' ? 'sel_fade_idle' : 'sel_seek_idle';
@@ -89,9 +87,9 @@ export class ShopScene extends Phaser.Scene {
     this.swapB = this.button(24, 118, '', () => this.swap());
     this.repairB = this.button(24, 166, '', () => this.repair());
     this.button(W - 24, 18, 'CONTINUE \u25B6', () => this.leave(), '#7CFF9A').setOrigin(1, 0);
-    this.add.text(24, 674, 'FRONT SLOT:', { ...FONT, fontSize: '18px', color: '#e8dccb', stroke: '#000', strokeThickness: 5 }).setOrigin(0, 0.5);
-    this.slotBs = PARTS.map((p, i) => this.button(0, 658, p.name, () => this.buy(i), undefined, 15));
-    this.msg = this.add.text(Math.round(W / 2), 600, '', { ...FONT, fontSize: '20px', color: '#ffe6a8', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);
+    this.add.text(24, 232, 'FRONT SLOT:', { ...FONT, fontSize: '18px', color: '#e8dccb', stroke: '#000', strokeThickness: 5 }).setOrigin(0, 0.5);
+    this.slotBs = PARTS.map((p, i) => this.button(0, 216, p.name, () => this.buy(i), undefined, 15));
+    this.msg = this.add.text(24, 272, '', { ...FONT, fontSize: '20px', color: '#ffe6a8', stroke: '#000', strokeThickness: 6 }).setOrigin(0, 0);
     this.refresh();
 
     const kb = this.input.keyboard!;
@@ -118,9 +116,10 @@ export class ShopScene extends Phaser.Scene {
     const bb = v === 'front34' ? this.bbF : this.bbR;
     // right-align each view's bbox to the slot edge next to the driver, so the gap stays the same in both views
     this.carLayer.x = this.carLeft + this.carSlotW - bb[2];
-    for (const o of sectionDrawOrder(this.levels)) this.carLayer.add(this.add.image(0, 0, `shop_${d}_${v}_${o.sec}_${o.level}`).setOrigin(0));
-    this.carLayer.add(this.add.image(0, 0, `shop_${d}_${v}_rear_engine`).setOrigin(0));
-    this.carLayer.add(this.add.image(0, 0, `shop_${d}_${v}_front_gear`).setOrigin(0));
+    this.carLayer.y = FLOOR - bb[3];
+    for (const o of sectionDrawOrder(this.levels)) this.carLayer.add(this.add.image(0, 0, `shopfit_${d}_${v}_${o.sec}_${o.level}`).setOrigin(0));
+    this.carLayer.add(this.add.image(0, 0, `shopfit_${d}_${v}_rear_engine`).setOrigin(0));
+    this.carLayer.add(this.add.image(0, 0, `shopfit_${d}_${v}_front_gear`).setOrigin(0));
   }
 
   refresh() {
@@ -165,7 +164,6 @@ export class ShopScene extends Phaser.Scene {
     this.registry.set('levels', this.levels.slice()); this.registry.set('scrap', this.scrap);
     this.cameras.main.fadeOut(200, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      if (this.restoreW) { (window as any).__ggMinW?.(0); this.restoreW = false; }
       this.scene.stop(); this.scene.resume('Level');
     });
   }
