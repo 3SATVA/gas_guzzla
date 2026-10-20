@@ -1,0 +1,10 @@
+import { chromium } from 'playwright-core';
+const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+p.on('console', (m) => console.log('[console]', m.type(), m.text()));
+p.on('pageerror', (e) => console.log('[pageerror]', e.message));
+await p.goto('http://localhost:4173/?seed=7');
+await p.waitForTimeout(6000);
+console.log(await p.evaluate(() => ({ r: __gg.game.renderer.type, max: __gg.game.renderer.gl?.getParameter(__gg.game.renderer.gl.MAX_TEXTURE_SIZE), scenes: __gg.game.scene.getScenes(true).map(s=>s.scene.key) })));
+await p.screenshot({ path: 'shots/_smoke_select.png' });
+await b.close();
