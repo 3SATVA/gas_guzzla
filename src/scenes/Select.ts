@@ -17,7 +17,7 @@ export class SelectScene extends Phaser.Scene {
     const m = this.cache.json.get('manifest');
     const sel = m.select_screen;
     const L = sel.layout;
-    this.index = 0; this.swiping = false; this.shaking = false; this.leaving = false;
+    this.index = this.registry.get('driver') === 'seek' ? 1 : 0; this.swiping = false; this.shaking = false; this.leaving = false;
     this.cameras.main.setZoom(1).setScroll(0, 0).setBackgroundColor('#000');
     this.cameras.main.fadeIn(250, 0, 0, 0);
 
@@ -33,16 +33,16 @@ export class SelectScene extends Phaser.Scene {
     fade.add(this.add.sprite(fg.fade_frame_pos[0], fg.fade_frame_pos[1], 'sel_fade_idle', 0).setOrigin(0).play('sel_fade_idle'));
     fade.add(this.add.image(fg.name_pos[0], fg.name_pos[1], 'sel_name_fade').setOrigin(0));
 
-    // ---- Seek group (locked): placeholder car, label, greyed idle, name, padlock, LOCKED
+    // ---- Seek group: her Trans Am (body -> blue anti-grav engine -> hooks bounce sheets), Seek idle, name
     const sg = L.seek_group;
     const seek = this.add.container(L.carousel.offscreen_right_x, 0);
-    seek.add(this.add.sprite(sg.car_frame_pos[0], sg.car_frame_pos[1], 'sel_seek_car', 0).setOrigin(0).play('sel_seek_car'));
-    seek.add(this.add.image(sg.placeholder_label_pos[0], sg.placeholder_label_pos[1], 'sel_seek_label').setOrigin(0));
-    seek.add(this.add.sprite(sg.seek_frame_pos[0], sg.seek_frame_pos[1], 'sel_seek_idle_locked', 0).setOrigin(0).play('sel_seek_idle_locked'));
+    for (const k of ['sel_seek_car_body', 'sel_seek_car_engine', 'sel_seek_car_gear']) {
+      seek.add(this.add.sprite(sg.car_frame_pos[0], sg.car_frame_pos[1], k, 0).setOrigin(0).play(k));
+    }
+    seek.add(this.add.sprite(sg.seek_frame_pos[0], sg.seek_frame_pos[1], 'sel_seek_idle', 0).setOrigin(0).play('sel_seek_idle'));
     seek.add(this.add.image(sg.name_pos[0], sg.name_pos[1], 'sel_name_seek').setOrigin(0));
-    seek.add(this.add.image(sg.padlock_pos[0], sg.padlock_pos[1], 'sel_padlock').setOrigin(0));
-    seek.add(this.add.image(sg.locked_text_pos[0], sg.locked_text_pos[1], 'sel_locked').setOrigin(0));
     this.groups = [fade, seek];
+    if (this.index === 1) { fade.x = -L.carousel.offscreen_right_x; seek.x = 0; }
 
     // ---- UI: drawn last, never moves
     this.add.image(L.ui.logo_pos[0], L.ui.logo_pos[1], 'sel_logo').setOrigin(0);
@@ -76,7 +76,7 @@ export class SelectScene extends Phaser.Scene {
   }
 
   private updateHint() {
-    this.hint.setText(this.index === 0 ? 'ENTER / TAP  -  DRIVE AS FADE' : 'SEEK IS LOCKED');
+    this.hint.setText(this.index === 0 ? 'ENTER / TAP  -  DRIVE AS FADE' : 'ENTER / TAP  -  DRIVE AS SEEK');
   }
 
   swipe(dir: number) {
@@ -102,15 +102,7 @@ export class SelectScene extends Phaser.Scene {
 
   choose() {
     if (this.swiping || this.leaving) return;
-    if (this.index !== 0) {
-      if (this.shaking) return;
-      this.shaking = true;
-      const g = this.groups[this.index];
-      const xs = [-14, 12, -10, 8, -5, 3, 0];
-      let i = 0;
-      this.time.addEvent({ delay: 35, repeat: xs.length - 1, callback: () => { g.x = xs[i++]; if (i >= xs.length) this.shaking = false; } });
-      return;
-    }
+    this.registry.set('driver', this.index === 0 ? 'fade' : 'seek');
     this.leaving = true;
     this.cameras.main.fadeOut(300, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.start('Level'));

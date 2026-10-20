@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SECTIONS } from '../game/damage';
+import { SECTIONS, DRIVERS, carPrefix } from '../game/damage';
 
 export class PreloadScene extends Phaser.Scene {
   constructor() { super('Preload'); }
@@ -28,13 +28,15 @@ export class PreloadScene extends Phaser.Scene {
     const bs = m.collision_layer.black_shards;
     this.load.spritesheet('black_shards', A + bs.file, { frameWidth: bs.cell_size[0], frameHeight: bs.cell_size[1] });
 
-    // --- player car (side view)
-    const pc = m.player_car_fade;
-    for (const sec of SECTIONS) for (let l = 0; l <= 3; l++) this.load.image(`car_${sec}_${l}`, A + pc.files.sections[sec][String(l)]);
-    this.load.image('car_rear_engine', A + pc.files.rear_engine);
-    this.load.image('car_front_gear', A + pc.files.front_gear);
-    this.load.image('car_composite', A + pc.files.composite);
-    this.load.spritesheet('car_flame', A + pc.flame.file, { frameWidth: pc.flame.frame_size[0], frameHeight: pc.flame.frame_size[1] });
+    // --- player cars (side view): Fade keys 'car_*', Seek keys 'seekcar_*'
+    for (const d of DRIVERS) {
+      const pc = m[`player_car_${d}`], P = carPrefix(d);
+      for (const sec of SECTIONS) for (let l = 0; l <= 3; l++) this.load.image(`${P}_${sec}_${l}`, A + pc.files.sections[sec][String(l)]);
+      this.load.image(`${P}_rear_engine`, A + pc.files.rear_engine);
+      this.load.image(`${P}_front_gear`, A + pc.files.front_gear);
+      this.load.image(`${P}_composite`, A + pc.files.composite);
+      this.load.spritesheet(`${P}_flame`, A + pc.flame.file, { frameWidth: pc.flame.frame_size[0], frameHeight: pc.flame.frame_size[1] });
+    }
 
     // --- enemies
     const e = m.enemies;
@@ -70,7 +72,12 @@ export class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('sel_car_body', S + 'grid/car34_bounce_body_sheet_grid.png', grid);
     this.load.spritesheet('sel_car_engine', S + 'grid/car34_bounce_rear_engine_sheet_grid.png', grid);
     this.load.spritesheet('sel_car_gear', S + 'grid/car34_bounce_front_gear_sheet_grid.png', grid);
-    this.load.spritesheet('sel_seek_car', S + 'grid/seek_car_placeholder_sheet_grid.png', grid);
+    const sb = m.select_screen.seek_group.car_bounce;
+    const sgrid = { frameWidth: sb.frame_size[0], frameHeight: sb.frame_size[1], endFrame: sb.frames - 1 };
+    this.load.spritesheet('sel_seek_car_body', A + sb.layers.body, sgrid);
+    this.load.spritesheet('sel_seek_car_engine', A + sb.layers.rear_engine, sgrid);
+    this.load.spritesheet('sel_seek_car_gear', A + sb.layers.front_gear, sgrid);
+    this.load.spritesheet('sel_seek_idle', S + 'seek_idle_sheet.png', { frameWidth: 248, frameHeight: 609 });
   }
 
   create() {
@@ -85,7 +92,7 @@ export class PreloadScene extends Phaser.Scene {
       const b = pieces[name].break;
       if (b) seq(name + '_break', b.frames, b.frame_ms, 0);
     }
-    seq('car_flame', m.player_car_fade.flame.frames, m.player_car_fade.flame.frame_ms);
+    for (const d of DRIVERS) seq(`${carPrefix(d)}_flame`, m[`player_car_${d}`].flame.frames, m[`player_car_${d}`].flame.frame_ms);
     seq('drone_fly', 4, m.enemies.drone.fly.frame_ms);
     seq('drone_break', 6, m.enemies.drone.break.frame_ms, 0);
     seq('hover_white_break', 6, m.enemies.hover_white.break.frame_ms, 0);
@@ -95,10 +102,14 @@ export class PreloadScene extends Phaser.Scene {
     const sel = m.select_screen;
     seq('sel_fade_idle', 6, sel.fade_group.fade_idle.frame_ms);
     seq('sel_seek_idle_locked', 6, sel.seek_group.seek_idle.frame_ms);
-    for (const k of ['sel_car_body', 'sel_car_engine', 'sel_car_gear', 'sel_seek_car']) seq(k, 20, sel.fade_group.car_bounce.frame_ms);
+    seq('sel_seek_idle', 6, sel.seek_group.seek_idle.frame_ms);
+    for (const k of ['sel_car_body', 'sel_car_engine', 'sel_car_gear']) seq(k, 20, sel.fade_group.car_bounce.frame_ms);
+    for (const k of ['sel_seek_car_body', 'sel_seek_car_engine', 'sel_seek_car_gear']) seq(k, 20, sel.seek_group.car_bounce.frame_ms);
 
     const q = new URLSearchParams(location.search);
     const start = q.get('scene');
+    const drv = q.get('driver');
+    if (drv === 'seek' || drv === 'fade') this.registry.set('driver', drv);
     if (start === 'level') this.scene.start('Level');
     else this.scene.start('Select');
   }

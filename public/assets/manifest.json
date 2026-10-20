@@ -8226,16 +8226,15 @@
    "seek_group": {
     "on_screen_offset_x": 0,
     "layers_back_to_front": [
-     "seek_car_placeholder (swap for real body/gear/engine sheets later, same car_frame_pos)",
-     "seek_car_placeholder_label",
-     "seek_idle_locked",
-     "name_seek",
-     "padlock",
-     "locked_text"
+     "seek_car34_bounce_body",
+     "seek_car34_bounce_rear_engine",
+     "seek_car34_bounce_front_gear",
+     "seek_idle",
+     "name_seek"
     ],
     "car_frame_pos": [
-     73,
-     279
+     36,
+     198
     ],
     "seek_frame_pos": [
      606,
@@ -8249,7 +8248,7 @@
      653,
      800
     ],
-    "rule": "same rule vs placeholder; re-measure when the real Trans Am lands",
+    "rule": "figure centred on span front-axle(near hook)..door-front-edge of Seek's Trans Am (layer x 637..818 -> screen ~731)",
     "name_pos": [
      666,
      64
@@ -8501,7 +8500,7 @@
    }
   },
   "seek_group": {
-   "selectable": false,
+   "selectable": true,
    "car_placeholder": {
     "file": "select/seek_car_placeholder_sheet.png",
     "still": "select/seek_car_placeholder.png",
@@ -8620,6 +8619,50 @@
      666,
      64
     ]
+   },
+   "car_bounce": {
+    "frame_size": [
+     1205,
+     523
+    ],
+    "frames": 20,
+    "frame_ms": [
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100,
+     100
+    ],
+    "pos": [
+     36,
+     198
+    ],
+    "layers": {
+     "body": "select/grid/seek_car34_bounce_body_sheet_grid.png",
+     "rear_engine": "select/grid/seek_car34_bounce_rear_engine_sheet_grid.png",
+     "front_gear": "select/grid/seek_car34_bounce_front_gear_sheet_grid.png"
+    },
+    "grid_cols": 3,
+    "crop_origin_in_1280x720_layer": [
+     33,
+     116
+    ],
+    "resample": "none (nearest integer pixel shifts of the approved front34 layers)"
    }
   },
   "carousel": {
@@ -9019,5 +9062,77 @@
    640,
    360
   ]
+ },
+ "player_car_seek": {
+  "facing": "right",
+  "canvas": [
+   172,
+   97
+  ],
+  "source": "cars/seek/side/fullres (approved Seek side master) -> one-step BOX + no-dither palette, same as car_fade",
+  "draw_order": [
+   "(per section) body_sections/<sec>_0.png or damage/<sec>_<lvl>.png, lowest level first, highest last",
+   "glow frame (anchored at engine pod, blue anti-grav wake, no fire)",
+   "rear_engine.png",
+   "front_gear.png"
+  ],
+  "files": {
+   "body": "car_seek/body.png",
+   "composite": "car_seek/composite.png",
+   "rear_engine": "car_seek/rear_engine.png",
+   "front_gear": "car_seek/front_gear.png",
+   "sections": {
+    "front": {
+     "0": "car_seek/body_sections/front_0.png",
+     "1": "car_seek/damage/front_1.png",
+     "2": "car_seek/damage/front_2.png",
+     "3": "car_seek/damage/front_3.png"
+    },
+    "middle": {
+     "0": "car_seek/body_sections/middle_0.png",
+     "1": "car_seek/damage/middle_1.png",
+     "2": "car_seek/damage/middle_2.png",
+     "3": "car_seek/damage/middle_3.png"
+    },
+    "back": {
+     "0": "car_seek/body_sections/back_0.png",
+     "1": "car_seek/damage/back_1.png",
+     "2": "car_seek/damage/back_2.png",
+     "3": "car_seek/damage/back_3.png"
+    }
+   }
+  },
+  "section_x_ranges_suggestion": {
+   "back": [
+    5,
+    59
+   ],
+   "middle": [
+    59,
+    108
+   ],
+   "front": [
+    108,
+    168
+   ]
+  },
+  "engine_nozzle_point": [
+   28,
+   54
+  ],
+  "flame": {
+   "file": "car_seek/glow_sheet.png",
+   "frames": 6,
+   "frame_size": [
+    34,
+    21
+   ],
+   "frame_ms": 70,
+   "anchor_in_frame": [
+    33,
+    10
+   ],
+   "style": "procedural chunky pixel BLUE anti-grav glow + ripples, no fire"
+  }
  }
 }

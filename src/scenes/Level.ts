@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { applyHit, sectionDrawOrder, sectionKey, SECTIONS } from '../game/damage';
+import { applyHit, sectionDrawOrder, sectionKey, SECTIONS, carPrefix, currentDriver, Driver } from '../game/damage';
 import { maskOf, solidAt, Mask } from '../game/mask';
 import { Rng } from '../game/rng';
 import type { HudScene } from './Hud';
@@ -33,6 +33,8 @@ interface Strip { imgs: Phaser.GameObjects.Image[]; w: number; f: number; }
 
 export class LevelScene extends Phaser.Scene {
   m: any;
+  driver: Driver = 'fade';
+  pc: any;
   rng!: Rng;
   hud!: HudScene;
   // world
@@ -75,6 +77,9 @@ export class LevelScene extends Phaser.Scene {
 
   create() {
     this.m = this.cache.json.get('manifest');
+    this.driver = currentDriver(this.registry);
+    this.pc = this.m[`player_car_${this.driver}`];
+    const P = carPrefix(this.driver);
     const q = new URLSearchParams(location.search);
     const seed = Number(q.get('seed')) || (Date.now() & 0xffffff);
     this.rng = new Rng(seed);
@@ -108,13 +113,13 @@ export class LevelScene extends Phaser.Scene {
     // like everything else, so the tilt never breaks the 640x360 pixel grid.
     this.rig = this.make.container({ x: 0, y: 0 }, false);
     this.secImgs = [];
-    for (let i = 0; i < 3; i++) this.secImgs.push(this.make.image({ x: -CAR_CX, y: -CAR_CY, key: sectionKey(SECTIONS[i], 0), origin: 0 }, false));
-    const fl = this.m.player_car_fade.flame;
-    const np = this.m.player_car_fade.engine_nozzle_point;
-    this.flame = this.make.sprite({ x: -CAR_CX + np[0] - fl.anchor_in_frame[0], y: -CAR_CY + np[1] - fl.anchor_in_frame[1], key: 'car_flame', origin: 0 }, false);
-    this.flame.play('car_flame');
-    this.engine = this.make.image({ x: -CAR_CX, y: -CAR_CY, key: 'car_rear_engine', origin: 0 }, false);
-    this.gear = this.make.image({ x: -CAR_CX, y: -CAR_CY, key: 'car_front_gear', origin: 0 }, false);
+    for (let i = 0; i < 3; i++) this.secImgs.push(this.make.image({ x: -CAR_CX, y: -CAR_CY, key: sectionKey(SECTIONS[i], 0, this.driver), origin: 0 }, false));
+    const fl = this.pc.flame;
+    const np = this.pc.engine_nozzle_point;
+    this.flame = this.make.sprite({ x: -CAR_CX + np[0] - fl.anchor_in_frame[0], y: -CAR_CY + np[1] - fl.anchor_in_frame[1], key: `${P}_flame`, origin: 0 }, false);
+    this.flame.play(`${P}_flame`);
+    this.engine = this.make.image({ x: -CAR_CX, y: -CAR_CY, key: `${P}_rear_engine`, origin: 0 }, false);
+    this.gear = this.make.image({ x: -CAR_CX, y: -CAR_CY, key: `${P}_front_gear`, origin: 0 }, false);
     this.rig.add([...this.secImgs, this.flame, this.engine, this.gear]);
     const rt = this.textures.exists('car_rt') ? (this.textures.get('car_rt') as Phaser.Textures.DynamicTexture) : this.textures.addDynamicTexture('car_rt', RIG_W, RIG_H)!;
     rt.setFilter(Phaser.Textures.FilterMode.NEAREST);
@@ -166,11 +171,11 @@ export class LevelScene extends Phaser.Scene {
   // ------------------------------------------------------------------ car layers
   applySectionTextures() {
     const order = sectionDrawOrder(this.levels);
-    order.forEach((o, i) => this.secImgs[i].setTexture(sectionKey(o.sec, o.level)));
+    order.forEach((o, i) => this.secImgs[i].setTexture(sectionKey(o.sec, o.level, this.driver)));
   }
 
   buildCarPoints() {
-    const mk = maskOf(this, 'car_composite');
+    const mk = maskOf(this, `${carPrefix(this.driver)}_composite`);
     this.carPts = [];
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     for (let y = 0; y < mk.h; y += 2) for (let x = 0; x < mk.w; x += 2) {
@@ -185,7 +190,7 @@ export class LevelScene extends Phaser.Scene {
   get px() { return this.scroll + this.sx; }
 
   sectionAtLocalX(lx: number): number {
-    const r = this.m.player_car_fade.section_x_ranges_suggestion;
+    const r = this.pc.section_x_ranges_suggestion;
     if (lx < r.middle[0]) return 0;
     if (lx < r.front[0]) return 1;
     return 2;
@@ -681,7 +686,7 @@ export class LevelScene extends Phaser.Scene {
     const cx = Math.round(this.px), cy = Math.round(this.py);
     g.lineStyle(1, 0x00ff66, 0.8);
     g.strokeRect(cx + this.carBox.x0, cy + this.carBox.y0, this.carBox.x1 - this.carBox.x0, this.carBox.y1 - this.carBox.y0);
-    const r = this.m.player_car_fade.section_x_ranges_suggestion;
+    const r = this.pc.section_x_ranges_suggestion;
     g.lineStyle(1, 0xffff00, 0.8);
     for (const k of ['middle', 'front']) g.lineBetween(cx + r[k][0], cy + 20, cx + r[k][0], cy + 80);
     for (const o of this.obstacles) {

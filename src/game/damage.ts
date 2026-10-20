@@ -49,4 +49,13 @@ export function sectionDrawOrder(levels: number[]): { sec: SectionName; level: n
     .map(({ sec, level }) => ({ sec, level }));
 }
 
-export function sectionKey(sec: SectionName, level: number) { return `car_${sec}_${level}`; }
+export type Driver = 'fade' | 'seek';
+export const DRIVERS: Driver[] = ['fade', 'seek'];
+/** Texture-key prefix per driver's car (Fade keeps the original 'car' keys). */
+export function carPrefix(d: Driver) { return d === 'fade' ? 'car' : 'seekcar'; }
+export function sectionKey(sec: SectionName, level: number, d: Driver = 'fade') { return `${carPrefix(d)}_${sec}_${level}`; }
+export function currentDriver(reg: { get(k: string): any }): Driver {
+  const q = new URLSearchParams(location.search).get('driver');
+  const r = reg.get('driver');
+  return (r === 'seek' || r === 'fade') ? r : q === 'seek' ? 'seek' : 'fade';
+}
