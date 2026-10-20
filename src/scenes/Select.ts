@@ -18,10 +18,16 @@ export class SelectScene extends Phaser.Scene {
     const sel = m.select_screen;
     const L = sel.layout;
     this.index = this.registry.get('driver') === 'seek' ? 1 : 0; this.swiping = false; this.shaking = false; this.leaving = false;
-    this.cameras.main.setZoom(1).setScroll(0, 0).setBackgroundColor('#000');
+    const off = Math.round((this.scale.width - 1280) / 2);
+    this.cameras.main.setZoom(1).setScroll(-off, 0).setBackgroundColor('#000');
     this.cameras.main.fadeIn(250, 0, 0, 0);
 
     this.add.image(0, 0, 'sel_bg').setOrigin(0);
+    // wide screens: mirrored copies of the approved backdrop fill the extra width (no resampling)
+    this.add.image(-1280, 0, 'sel_bg').setOrigin(0).setFlipX(true);
+    this.add.image(1280, 0, 'sel_bg').setOrigin(0).setFlipX(true);
+    this.scale.on('resize', this.onResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off('resize', this.onResize, this));
 
     // ---- Fade group: car body -> rear engine -> front gear (all bounce sheets share one canvas), Fade idle, name
     const fg = L.fade_group;
@@ -35,14 +41,14 @@ export class SelectScene extends Phaser.Scene {
 
     // ---- Seek group: her Trans Am (body -> blue anti-grav engine -> hooks bounce sheets), Seek idle, name
     const sg = L.seek_group;
-    const seek = this.add.container(L.carousel.offscreen_right_x, 0);
+    const seek = this.add.container(Math.max(L.carousel.offscreen_right_x, this.scale.width), 0);
     for (const k of ['sel_seek_car_body', 'sel_seek_car_engine', 'sel_seek_car_gear']) {
       seek.add(this.add.sprite(sg.car_frame_pos[0], sg.car_frame_pos[1], k, 0).setOrigin(0).play(k));
     }
     seek.add(this.add.sprite(sg.seek_frame_pos[0], sg.seek_frame_pos[1], 'sel_seek_idle', 0).setOrigin(0).play('sel_seek_idle'));
     seek.add(this.add.image(sg.name_pos[0], sg.name_pos[1], 'sel_name_seek').setOrigin(0));
     this.groups = [fade, seek];
-    if (this.index === 1) { fade.x = -L.carousel.offscreen_right_x; seek.x = 0; }
+    if (this.index === 1) { fade.x = -Math.max(L.carousel.offscreen_right_x, this.scale.width); seek.x = 0; }
 
     // ---- UI: drawn last, never moves
     this.add.image(L.ui.logo_pos[0], L.ui.logo_pos[1], 'sel_logo').setOrigin(0);
@@ -63,17 +69,19 @@ export class SelectScene extends Phaser.Scene {
     kb.on('keydown-SPACE', () => this.choose());
 
     let downX = 0, downT = 0;
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { downX = p.x; downT = p.time; });
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { downX = p.worldX; downT = p.time; });
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
-      const dx = p.x - downX;
+      const dx = p.worldX - downX;
       if (Math.abs(dx) > 60 && p.time - downT < 600) { this.swipe(dx < 0 ? 1 : -1); return; }
       // tap: edges swipe, middle chooses
-      if (p.x < 120) this.swipe(-1);
-      else if (p.x > 1160) this.swipe(1);
+      if (p.worldX < 120) this.swipe(-1);
+      else if (p.worldX > 1160) this.swipe(1);
       else this.choose();
     });
     (window as any).__gg.select = this;
   }
+
+  private onResize() { this.cameras.main.setScroll(-Math.round((this.scale.width - 1280) / 2), 0); }
 
   private updateHint() {
     this.hint.setText(this.index === 0 ? 'ENTER / TAP  -  DRIVE AS FADE' : 'ENTER / TAP  -  DRIVE AS SEEK');
@@ -86,7 +94,7 @@ export class SelectScene extends Phaser.Scene {
     const car = this.cache.json.get('manifest').select_screen.carousel;
     const cur = this.groups[this.index];
     const nxt = this.groups[next];
-    const W = car.offscreen_right_x; // 1280
+    const W = Math.max(car.offscreen_right_x, this.scale.width); // off-screen even on wide canvases
     nxt.x = dir > 0 ? W : -W;
     this.swiping = true;
     this.tweens.addCounter({

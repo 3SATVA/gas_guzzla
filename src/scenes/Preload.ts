@@ -28,14 +28,32 @@ export class PreloadScene extends Phaser.Scene {
     const bs = m.collision_layer.black_shards;
     this.load.spritesheet('black_shards', A + bs.file, { frameWidth: bs.cell_size[0], frameHeight: bs.cell_size[1] });
 
-    // --- player cars (side view): Fade keys 'car_*', Seek keys 'seekcar_*'
+    // --- player cars (side view, 128x72 = exact 10:1 box of the approved full-res side masters): keys 'sm_<driver>_*'
+    const p2 = this.cache.json.get('p2');
     for (const d of DRIVERS) {
-      const pc = m[`player_car_${d}`], P = carPrefix(d);
-      for (const sec of SECTIONS) for (let l = 0; l <= 3; l++) this.load.image(`${P}_${sec}_${l}`, A + pc.files.sections[sec][String(l)]);
-      this.load.image(`${P}_rear_engine`, A + pc.files.rear_engine);
-      this.load.image(`${P}_front_gear`, A + pc.files.front_gear);
-      this.load.image(`${P}_composite`, A + pc.files.composite);
-      this.load.spritesheet(`${P}_flame`, A + pc.flame.file, { frameWidth: pc.flame.frame_size[0], frameHeight: pc.flame.frame_size[1] });
+      const P = carPrefix(d), F = A + `car_${d}_small/`;
+      for (const sec of SECTIONS) for (let l = 0; l <= 3; l++) this.load.image(`${P}_${sec}_${l}`, F + (l === 0 ? `body_sections/${sec}_0.png` : `damage/${sec}_${l}.png`));
+      this.load.image(`${P}_rear_engine`, F + 'rear_engine.png');
+      this.load.image(`${P}_front_gear`, F + 'front_gear.png');
+      this.load.image(`${P}_composite`, F + 'composite.png');
+      const g = p2[d].glow;
+      this.load.spritesheet(`${P}_flame`, A + g.file, { frameWidth: g.frame_size[0], frameHeight: g.frame_size[1] });
+      this.load.spritesheet(`${P}_driver`, F + 'driver_sheet.png', { frameWidth: 14, frameHeight: 16 });
+    }
+    this.load.spritesheet('scrap', A + 'scrap_sheet.png', { frameWidth: 13, frameHeight: 11 });
+    // phase 2 enemies: dark security drones, graffiti gang drones, smaller Tesla traffic
+    const EN = A + 'enemies/';
+    for (const k of ['drone_security', 'drone_gang']) {
+      const fh = k === 'drone_gang' ? 26 : 21;
+      this.load.spritesheet(k + '_fly', EN + k + '_fly_sheet.png', { frameWidth: 95, frameHeight: fh });
+      this.load.image(k + '_smashed', EN + k + '_smashed.png');
+      this.load.spritesheet(k + '_break', EN + k + '_break_sheet.png', { frameWidth: 139, frameHeight: fh + 44 });
+    }
+    for (const k of ['hover_white_small', 'hover_black_small']) {
+      this.load.image(k, EN + k + '.png');
+      this.load.image(k + '_smashed', EN + k + '_smashed.png');
+      const [bw, bh] = k === 'hover_white_small' ? [139, 66] : [140, 67];
+      this.load.spritesheet(k + '_break', EN + k + '_break_sheet.png', { frameWidth: bw, frameHeight: bh });
     }
 
     // --- enemies
@@ -92,7 +110,10 @@ export class PreloadScene extends Phaser.Scene {
       const b = pieces[name].break;
       if (b) seq(name + '_break', b.frames, b.frame_ms, 0);
     }
-    for (const d of DRIVERS) seq(`${carPrefix(d)}_flame`, m[`player_car_${d}`].flame.frames, m[`player_car_${d}`].flame.frame_ms);
+    for (const d of DRIVERS) seq(`${carPrefix(d)}_flame`, 6, 70);
+    seq('scrap', 4, [700, 90, 90, 90]);
+    for (const k of ['drone_security', 'drone_gang']) { seq(k + '_fly', 4, 40); seq(k + '_break', 6, 70, 0); }
+    for (const k of ['hover_white_small', 'hover_black_small']) seq(k + '_break', 6, 70, 0);
     seq('drone_fly', 4, m.enemies.drone.fly.frame_ms);
     seq('drone_break', 6, m.enemies.drone.break.frame_ms, 0);
     seq('hover_white_break', 6, m.enemies.hover_white.break.frame_ms, 0);
@@ -108,9 +129,10 @@ export class PreloadScene extends Phaser.Scene {
 
     const q = new URLSearchParams(location.search);
     const start = q.get('scene');
+    if (q.get('scrap')) this.registry.set('scrap', Number(q.get('scrap')) || 0);
     const drv = q.get('driver');
     if (drv === 'seek' || drv === 'fade') this.registry.set('driver', drv);
-    if (start === 'level') this.scene.start('Level');
+    if (start === 'level' || start === 'shop') this.scene.start('Level');
     else this.scene.start('Select');
   }
 }

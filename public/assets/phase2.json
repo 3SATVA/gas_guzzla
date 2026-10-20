@@ -1,0 +1,114 @@
+{
+ "fade": {
+  "canvas": [
+   128,
+   72
+  ],
+  "engine_bbox": [
+   22,
+   36,
+   45,
+   49
+  ],
+  "engine_pivot": [
+   39,
+   36
+  ],
+  "engine_nozzle": [
+   22,
+   43
+  ],
+  "gear_bbox": [
+   96,
+   39,
+   105,
+   47
+  ],
+  "gear_pivot": [
+   100,
+   39
+  ],
+  "body_bbox": [
+   5,
+   18,
+   123,
+   49
+  ],
+  "section_x": {
+   "middle": 33,
+   "front": 78
+  },
+  "glow": {
+   "file": "car_fade_small/glow_sheet.png",
+   "frame_size": [
+    24,
+    15
+   ],
+   "frames": 6,
+   "anchor": [
+    23,
+    7
+   ]
+  },
+  "driver_seat": [
+   54,
+   16
+  ]
+ },
+ "seek": {
+  "canvas": [
+   128,
+   72
+  ],
+  "engine_bbox": [
+   19,
+   33,
+   35,
+   45
+  ],
+  "engine_pivot": [
+   30,
+   33
+  ],
+  "engine_nozzle": [
+   19,
+   40
+  ],
+  "gear_bbox": [
+   93,
+   38,
+   111,
+   53
+  ],
+  "gear_pivot": [
+   96,
+   38
+  ],
+  "body_bbox": [
+   4,
+   17,
+   124,
+   53
+  ],
+  "section_x": {
+   "middle": 44,
+   "front": 80
+  },
+  "glow": {
+   "file": "car_seek_small/glow_sheet.png",
+   "frame_size": [
+    24,
+    15
+   ],
+   "frames": 6,
+   "anchor": [
+    23,
+    7
+   ]
+  },
+  "driver_seat": [
+   56,
+   16
+  ]
+ }
+}

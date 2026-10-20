@@ -1,0 +1,20 @@
+// Fade + phone-landscape viewport: full-screen fill + body shop with Fade
+import { chromium } from 'playwright-core';
+const out = process.argv[2] || '/workspace/gasguzla/cars/seek/review/phase2';
+const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const p = await (await b.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 })).newPage();
+const errors = []; p.on('pageerror', (e) => { errors.push(e.message); console.log('[pageerror]', e.message); });
+const wait = (ms) => p.waitForTimeout(ms);
+await p.goto((process.argv[3] || 'http://localhost:4173/') + '?seed=5');
+await p.waitForFunction(() => window.__gg?.select, null, { timeout: 30000 }); await wait(900);
+console.log('canvas', await p.evaluate(() => ({ w: __gg.game.scale.width, h: __gg.game.scale.height, css: __gg.game.canvas.style.width + 'x' + __gg.game.canvas.style.height })));
+await p.screenshot({ path: `${out}/p2_13_phone_select_fade.png` });
+await p.keyboard.press('Enter');
+await p.waitForFunction(() => window.__gg?.level?.scene?.isActive(), null, { timeout: 15000 });
+await p.evaluate(() => { const L = __gg.level; L.invuln = 99; L.autopilot = (s) => ({ ix: 0, iy: Math.max(-1, Math.min(1, (60 - s.py) / 18)) }); });
+await wait(3000); await p.screenshot({ path: `${out}/p2_14_phone_gameplay_fade.png` });
+await p.evaluate(() => { __gg.level.setDamage([0, 2, 1]); __gg.level.scrap = 90; __gg.level.openShop(); });
+await p.waitForFunction(() => window.__gg?.shop?.scene?.isActive() && __gg.shop.driver === 'fade', null, { timeout: 20000 }); await wait(900);
+await p.screenshot({ path: `${out}/p2_15_phone_body_shop_fade.png` });
+console.log(errors.length ? 'ERR' : 'FADE WIDE PASS', await p.evaluate(() => __gg.level.driver));
+await b.close();

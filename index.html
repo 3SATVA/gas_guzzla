@@ -8,10 +8,15 @@
     html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }
     #game { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
     #game canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+      #rotate { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: #f2c27a; font: bold 22px monospace; background: #000; z-index: 5; }
+    #fs { position: fixed; right: 8px; bottom: 8px; z-index: 4; width: 34px; height: 34px; border: 2px solid #56260e; background: rgba(0,0,0,.55); color: #f2c27a; font: bold 18px monospace; cursor: pointer; opacity: .7; }
+    #fs:hover { opacity: 1; }
   </style>
 </head>
 <body>
   <div id="game"></div>
+  <div id="rotate">ROTATE YOUR PHONE &#x21BB;</div>
+  <button id="fs" title="Full screen (F)" onclick="window.__ggFS && window.__ggFS()">&#x26F6;</button>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
