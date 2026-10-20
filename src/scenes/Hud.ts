@@ -58,7 +58,7 @@ export class HudScene extends Phaser.Scene {
     this.drv = lvl?.driver === 'seek' ? 'seek' : 'fade';
     this.iconSec = [0, 1, 2].map(() => this.make.image({ x: 0, y: 0, key: `hud_${this.drv}_back_0`, origin: 0 }, false));
     this.icon = this.add.container(14, 100, [...this.iconSec, this.make.image({ x: 0, y: 0, key: `hud_${this.drv}_rear_engine`, origin: 0 }, false), this.make.image({ x: 0, y: 0, key: `hud_${this.drv}_front_gear`, origin: 0 }, false)]);
-    this.dmgT = this.add.text(86, 102, 'TOTALLED 0%', { ...FONT, fontSize: '18px', color: '#e8dccb', stroke: '#000', strokeThickness: 6 });
+    this.dmgT = this.add.text(86, 102, 'TOTALED 0%', { ...FONT, fontSize: '18px', color: '#e8dccb', stroke: '#000', strokeThickness: 6 });
     this.dmgG = this.add.graphics();
     this.gas = 100; this.gasMax = 100; this.gasDry = false;
     this.drawGas(); this.drawDamage();
@@ -91,7 +91,7 @@ export class HudScene extends Phaser.Scene {
     const SEC = ['back', 'middle', 'front'], RED = [0xffffff, 0xffc8b8, 0xff8f7a, 0xff4a3a];
     order.forEach((o, k) => this.iconSec[k].setTexture(`hud_${this.drv}_${SEC[o.i]}_${o.l}`).setTint(RED[o.l]));
     const n = this.levels.reduce((a, b) => a + b, 0), pct = Math.round((n / 9) * 100);
-    this.dmgT.setText(`TOTALLED ${pct}%`).setColor(n >= 7 ? '#ff5a4a' : n >= 4 ? '#ffd76a' : '#e8dccb');
+    this.dmgT.setText(`TOTALED ${pct}%`).setColor(n >= 7 ? '#ff5a4a' : n >= 4 ? '#ffd76a' : '#e8dccb');
     const g = this.dmgG; g.clear();
     const X = 86, Y = 126, CW = 22, CH = 10, GAP = 3;
     g.fillStyle(0x000000, 1).fillRect(X - 3, Y - 3, 9 * (CW + GAP) - GAP + 6, CH + 6);
