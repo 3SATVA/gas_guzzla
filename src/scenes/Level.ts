@@ -17,27 +17,25 @@ const CAR_W = 128, CAR_H = 72, CAR_CX = 64, CAR_CY = 36;
 const RIG_W = 176, RIG_H = 104, RIG_CX = 88, RIG_CY = 52;
 const MAX_SPEED = 150, START_SPEED = 95, REV_SPEED = -MAX_SPEED / 3;
 const M = 40;
-// note 5: small Teslas in many lanes, both directions, busiest high up (p = chance a slot is filled).
-// g = spacing inside a platoon, pg = Frogger gap between platoons, n = platoon size.
-interface Lane { y: number; v: number; p: number; g: [number, number]; pg: [number, number]; n: [number, number]; ceil: boolean; }
+// note 5 + phase 5: AI-driven Teslas on straight RAILS. Every car in a lane sits exactly on the lane line (no bob, no
+// random y), all cars in a lane share one constant speed, and they run in a fixed repeating convoy pattern:
+// n cars spaced s px apart (centre to centre), then a gap of G px to the next convoy (lower lanes: Frogger gaps).
+interface Lane { y: number; v: number; s: number; n: number; G: number; ceil: boolean; }
 const BASE_LANES: Lane[] = [
-  { y: -346, v: -150, p: 0.85 }, // oncoming (faces left)
-  { y: -324, v: 74, p: 0.8 },    // same direction (faces right)
-  { y: -302, v: -126, p: 0.75 },
-  { y: -280, v: 60, p: 0.65 },
-  { y: -256, v: -108, p: 0.5 },
-  { y: -228, v: 86, p: 0.3 },
-  { y: -192, v: -96, p: 0.15 },
-].map((l) => ({ ...l, g: [74, 104] as [number, number], pg: [230, 400] as [number, number], n: [2, 4] as [number, number], ceil: false }));
+  { y: -346, v: -150, s: 80, n: 4, G: 300 }, // oncoming (faces left)
+  { y: -324, v: 74, s: 84, n: 3, G: 320 },   // same direction (faces right)
+  { y: -302, v: -126, s: 86, n: 3, G: 360 },
+  { y: -280, v: 60, s: 88, n: 2, G: 380 },
+  { y: -256, v: -108, s: 90, n: 2, G: 440 },
+  { y: -228, v: 86, s: 90, n: 1, G: 520 },
+  { y: -192, v: -96, s: 90, n: 1, G: 760 },
+].map((l) => ({ ...l, ceil: false }));
 // phase 4 TRAFFIC CEILING: 10 more lanes stacked every 18 px above the old top (Teslas are 16 px tall). Going up, every
-// lane is fuller, faster and tighter, and the Frogger gaps shrink below the car's length -> a solid wall at the top.
+// lane is faster, its convoys longer and tighter, and the gap between convoys shrinks below the car's length -> a
+// solid wall at the top.
 const CEIL_LANES: Lane[] = Array.from({ length: 10 }, (_, i) => {
   const t = i / 9, lerp = (a: number, b: number) => Math.round(a + (b - a) * t);
-  return {
-    y: -366 - i * 18, v: (i % 2 ? 1 : -1) * lerp(165, 290), p: 0.9 + 0.1 * t,
-    g: [lerp(70, 60), lerp(86, 64)] as [number, number], pg: [lerp(150, 60), lerp(210, 70)] as [number, number],
-    n: [lerp(3, 8), lerp(5, 12)] as [number, number], ceil: true,
-  };
+  return { y: -366 - i * 18, v: (i % 2 ? 1 : -1) * lerp(165, 290), s: lerp(72, 62), n: lerp(4, 40), G: lerp(200, 64), ceil: true };
 });
 const LANES: Lane[] = [...BASE_LANES, ...CEIL_LANES];
 // phase 4 GAS (units: tank = 100)
@@ -93,7 +91,8 @@ export class LevelScene extends Phaser.Scene {
   barrels: Barrel[] = []; falling: Falling[] = []; nextBarrel = 900;
   gas = GAS_MAX; dry = 0; dead: 'wreck' | 'gas' = 'wreck';
   nextX = 0; nextDrone = 0; nextShop = SHOP_FIRST; texN = 0;
-  laneState = LANES.map(() => ({ gap: 0, left: 0 }));
+  laneState = LANES.map(() => ({ k: 0 }));
+  laneDots: Phaser.GameObjects.TileSprite[] = [];
   // player rig
   car!: Phaser.GameObjects.Image;
   rig!: Phaser.GameObjects.Container;
@@ -153,7 +152,7 @@ export class LevelScene extends Phaser.Scene {
     this.nextX = 700; this.nextDrone = DRONE_FIRST; this.nextShop = SHOP_FIRST;
     this.barrels = []; this.falling = []; this.nextBarrel = 900; this.gas = GAS_MAX; this.dry = 0; this.dead = 'wreck';
     if (q.get('gas')) this.gas = Phaser.Math.Clamp(Number(q.get('gas')), 0, GAS_MAX);
-    this.laneState = LANES.map(() => ({ gap: 0, left: this.rng.int(2, 4) }));
+    this.laneState = LANES.map((ln) => ({ k: this.rng.int(0, ln.n - 1) }));
     this.arm = { st: 'idle', t: 0, dur: 0.3, target: null };
     this.anims.globalTimeScale = 1;
 
@@ -731,35 +730,49 @@ export class LevelScene extends Phaser.Scene {
   }
 
   // ------------------------------------------------------------------ traffic (note 5, 7, 12)
+  /** next centre-to-centre distance in the lane's repeating convoy pattern */
+  laneStep(i: number) { const ln = LANES[i], st = this.laneState[i]; st.k = (st.k + 1) % ln.n; return st.k === 0 ? ln.G : ln.s; }
+  addTesla(i: number, wx: number) {
+    const ln = LANES[i];
+    const t = this.rng.chance(0.55) ? this.p2.traffic.hover_white : this.p2.traffic.hover_black;
+    const img = this.add.image(Math.round(wx), ln.y, t.key).setOrigin(0).setDepth(19).setFlipX(ln.v > 0);
+    const c: Traffic = { spr: img, key: t.key, lane: i, wx, y: ln.y, v: ln.v, w: t.size[0], h: t.size[1], dead: false, margin: t.margin };
+    this.traffic.push(c);
+    return c;
+  }
   updateTraffic(dt: number) {
     const camTop = this.camY - 60, camBot = this.camY + VH + 60;
+    const x0 = this.scroll - 80, x1 = this.scroll + VW + 30;
+    // faint AI lane guide dots (world space, under the cars)
+    if (!this.laneDots.length) {
+      if (!this.textures.exists('p5_lane_dot')) { const ct = this.textures.createCanvas('p5_lane_dot', 12, 1)!; const g = ct.getContext(); g.fillStyle = '#9fe8ff'; g.fillRect(0, 0, 2, 1); ct.refresh(); }
+      this.laneDots = LANES.map((ln) => this.add.tileSprite(0, ln.y + 17, VW + 48, 1, 'p5_lane_dot').setOrigin(0).setDepth(18).setAlpha(ln.ceil ? 0.32 : 0.22));
+    }
+    this.laneDots.forEach((d) => { d.width = VW + 48; d.x = Math.floor(this.scroll / 12) * 12 - 24; });
     LANES.forEach((ln, i) => {
-      const st = this.laneState[i];
       // ceiling lanes far off-screen (below the camera) do not need cars yet; they fill in as soon as you climb
       if (ln.ceil && (ln.y < camTop - 200 || ln.y > camBot)) { this.traffic.filter((c) => c.lane === i).forEach((c) => { c.spr.destroy(); c.dead = true; }); return; }
-      const spawnX = ln.v < 0 || this.speed > ln.v ? this.scroll + VW + 30 : this.scroll - 80;
       const lane = this.traffic.filter((c) => c.lane === i && !c.dead);
-      const last = lane.length ? lane.reduce((a, b) => (Math.abs(b.wx - spawnX) < Math.abs(a.wx - spawnX) ? b : a)) : null;
-      if (!last || Math.abs(last.wx - spawnX) > st.gap) {
-        if (this.rng.chance(ln.p)) {
-          const t = this.rng.chance(0.55) ? this.p2.traffic.hover_white : this.p2.traffic.hover_black;
-          const img = this.add.image(0, 0, t.key).setOrigin(0).setDepth(19).setFlipX(ln.v > 0);
-          this.traffic.push({ spr: img, key: t.key, lane: i, wx: spawnX, y: ln.y + this.rng.int(-1, 1), v: ln.v * this.rng.range(0.94, 1.06), w: t.size[0], h: t.size[1], dead: false, margin: t.margin });
-        }
-        // platoons with Frogger gaps between them (note 12)
-        st.left--;
-        if (st.left <= 0) { st.left = this.rng.int(ln.n[0], ln.n[1]); st.gap = this.rng.int(ln.pg[0], ln.pg[1]); }
-        else st.gap = this.rng.int(ln.g[0], ln.g[1]);
+      if (!lane.length) {
+        // empty lane (start / just climbed into it): lay the whole visible rail out in its pattern at once
+        for (let x = x0 - this.rng.int(0, ln.G); x < x1; x += this.laneStep(i)) this.addTesla(i, x);
+        return;
       }
+      // cars enter on the side the lane flows in from; each new one sits exactly one pattern step behind the last
+      const fromRight = ln.v < 0 || this.speed > ln.v;
+      const edge = fromRight ? lane.reduce((a, b) => (b.wx > a.wx ? b : a)) : lane.reduce((a, b) => (b.wx < a.wx ? b : a));
+      let guard = 0;
+      if (fromRight) { let x = edge.wx; while (x < x1 && guard++ < 60) { x += this.laneStep(i); this.addTesla(i, x); } }
+      else { let x = edge.wx; while (x > x0 && guard++ < 60) { x -= this.laneStep(i); this.addTesla(i, x); } }
     });
     for (const c of this.traffic) {
       if (c.dead) continue;
       c.wx += c.v * dt;
-      c.spr.setPosition(Math.round(c.wx), Math.round(c.y + Math.sin((this.elapsed + c.wx * 0.01) * 5) * 1));
+      c.spr.setPosition(Math.round(c.wx), c.y);
     }
     this.traffic = this.traffic.filter((c) => {
       if (c.dead) return false;
-      if (c.wx < this.scroll - 400 || c.wx > this.scroll + VW + 700) { c.spr.destroy(); return false; }
+      if (c.wx < this.scroll - 1000 || c.wx > this.scroll + VW + 1000) { c.spr.destroy(); return false; }
       return true;
     });
   }
