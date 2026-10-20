@@ -10,6 +10,7 @@ const PARTS = [
   { id: 'gun', name: 'MACHINE GUN', cost: 400 },
 ];
 const REPAIR_COST = 15; // scrap hunnids per damage level
+const MARGIN = 24, GAP = 56;
 
 /** BODY SHOP mockup (phase 2). Authored at 1280x720 like the select screen: the approved 3/4 car layers are drawn
  *  1:1 (composited from the sectional damage layers for the current damage), the chosen driver stands next to the car
@@ -25,6 +26,8 @@ export class ShopScene extends Phaser.Scene {
   slotBs: Phaser.GameObjects.Text[] = [];
   levels = [0, 0, 0];
   scrap = 0;
+  bbF: number[] = []; bbR: number[] = []; carLeft = 0; carSlotW = 0; W = 1280; restoreW = false; prevMinW = 0;
+  drv!: Phaser.GameObjects.Sprite;
 
   constructor() { super('Shop'); }
 
@@ -48,36 +51,47 @@ export class ShopScene extends Phaser.Scene {
   }
 
   create() {
-    const W = this.scale.width;
+    // layout: [margin][native car, widest of both views][clear gap][native driver][margin]. When that does not fit the
+    // current canvas, the canvas is widened for the shop only (same CSS fit as everywhere, restored on CONTINUE).
+    const sh = this.cache.json.get('p2').shop[this.driver];
+    this.bbF = sh.front34; this.bbR = sh.rear34;
+    const carW = Math.max(this.bbF[2] - this.bbF[0], this.bbR[2] - this.bbR[0]);
+    const db = sh.driver_bbox, drvW = db[2] - db[0];
+    const need = MARGIN + carW + GAP + drvW + MARGIN;
+    this.prevMinW = 0;
+    if (this.scale.width < need) { (window as any).__ggMinW?.(need); this.restoreW = true; }
+    const W = Math.max(this.scale.width, need);
+    this.W = W;
+    const left = Math.round((W - need) / 2);
+    this.carLeft = left + MARGIN; this.carSlotW = carW;
     const cam = this.cameras.main;
-    cam.setZoom(1).setBackgroundColor('#000').setScroll(-Math.round((W - 1280) / 2), 0);
+    cam.setZoom(1).setBackgroundColor('#000').setScroll(0, 0);
     cam.fadeIn(250, 0, 0, 0);
     this.levels = ((this.registry.get('levels') as number[]) ?? [0, 0, 0]).slice();
     this.scrap = Number(this.registry.get('scrap') ?? 0);
-    // garage backdrop (approved select background; mirrored copies fill extra width on wide screens)
+    // garage backdrop (approved select background, 1:1; mirrored copies fill the extra width)
     this.add.image(0, 0, 'sel_bg').setOrigin(0);
-    this.add.image(-1280, 0, 'sel_bg').setOrigin(0).setFlipX(true);
     this.add.image(1280, 0, 'sel_bg').setOrigin(0).setFlipX(true);
-    this.add.rectangle(-400, 0, 2080, 720, 0x000000, 0.35).setOrigin(0);
+    this.add.image(2560, 0, 'sel_bg').setOrigin(0);
+    this.add.rectangle(0, 0, Math.max(W, 2560), 720, 0x000000, 0.35).setOrigin(0);
 
-    this.carLayer = this.add.container(-80, 70); // shifted left so the driver can stand beside the tail end
+    this.carLayer = this.add.container(0, 70);
     this.drawCar();
-    // driver next to the car (native, approved idle sheet)
+    // driver beside the car with clear space (native, approved idle sheet, never resampled)
     const idle = this.driver === 'fade' ? 'sel_fade_idle' : 'sel_seek_idle';
     const fh = this.driver === 'fade' ? 619 : 609;
-    this.add.sprite(1034, 712 - fh + 7, idle, 0).setOrigin(0).play(idle);
-
+    this.drv = this.add.sprite(this.carLeft + carW + GAP - db[0], 712 - fh + 7, idle, 0).setOrigin(0).play(idle);
     // UI
     this.add.text(24, 12, 'BODY SHOP', { ...FONT, fontSize: '46px', color: '#ff4fa0', stroke: '#2a0010', strokeThickness: 8 });
     this.add.text(300, 30, `${this.driver.toUpperCase()}'S RIDE  \u2022  MOCKUP`, { ...FONT, fontSize: '16px', color: '#d9d2c4', stroke: '#000', strokeThickness: 4 });
-    this.add.sprite(36, 88, 'scrap', 0).setScale(3).play('scrap');
+    this.add.sprite(36, 88, 'scrap', 6).setScale(2).play('scrap_3');
     this.scrapT = this.add.text(60, 74, '', { ...FONT, fontSize: '26px', color: '#ffd76a', stroke: '#000', strokeThickness: 6 });
     this.swapB = this.button(24, 118, '', () => this.swap());
     this.repairB = this.button(24, 166, '', () => this.repair());
-    this.button(W > 1280 ? 1280 + Math.round((W - 1280) / 2) - 24 : 1256, 18, 'CONTINUE \u25B6', () => this.leave(), '#7CFF9A').setOrigin(1, 0);
+    this.button(W - 24, 18, 'CONTINUE \u25B6', () => this.leave(), '#7CFF9A').setOrigin(1, 0);
     this.add.text(24, 674, 'FRONT SLOT:', { ...FONT, fontSize: '18px', color: '#e8dccb', stroke: '#000', strokeThickness: 5 }).setOrigin(0, 0.5);
     this.slotBs = PARTS.map((p, i) => this.button(0, 658, p.name, () => this.buy(i), undefined, 15));
-    this.msg = this.add.text(640, 600, '', { ...FONT, fontSize: '20px', color: '#ffe6a8', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);
+    this.msg = this.add.text(Math.round(W / 2), 600, '', { ...FONT, fontSize: '20px', color: '#ffe6a8', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);
     this.refresh();
 
     const kb = this.input.keyboard!;
@@ -101,6 +115,9 @@ export class ShopScene extends Phaser.Scene {
   drawCar() {
     this.carLayer.removeAll(true);
     const d = this.driver, v = this.view;
+    const bb = v === 'front34' ? this.bbF : this.bbR;
+    // right-align each view's bbox to the slot edge next to the driver, so the gap stays the same in both views
+    this.carLayer.x = this.carLeft + this.carSlotW - bb[2];
     for (const o of sectionDrawOrder(this.levels)) this.carLayer.add(this.add.image(0, 0, `shop_${d}_${v}_${o.sec}_${o.level}`).setOrigin(0));
     this.carLayer.add(this.add.image(0, 0, `shop_${d}_${v}_rear_engine`).setOrigin(0));
     this.carLayer.add(this.add.image(0, 0, `shop_${d}_${v}_front_gear`).setOrigin(0));
@@ -147,6 +164,9 @@ export class ShopScene extends Phaser.Scene {
   leave() {
     this.registry.set('levels', this.levels.slice()); this.registry.set('scrap', this.scrap);
     this.cameras.main.fadeOut(200, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => { this.scene.stop(); this.scene.resume('Level'); });
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      if (this.restoreW) { (window as any).__ggMinW?.(0); this.restoreW = false; }
+      this.scene.stop(); this.scene.resume('Level');
+    });
   }
 }

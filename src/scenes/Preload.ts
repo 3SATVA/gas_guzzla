@@ -38,9 +38,13 @@ export class PreloadScene extends Phaser.Scene {
       this.load.image(`${P}_composite`, F + 'composite.png');
       const g = p2[d].glow;
       this.load.spritesheet(`${P}_flame`, A + g.file, { frameWidth: g.frame_size[0], frameHeight: g.frame_size[1] });
-      this.load.spritesheet(`${P}_driver`, F + 'driver_sheet.png', { frameWidth: 14, frameHeight: 16 });
+      const df = p2[d].driver_frame ?? [14, 16];
+      this.load.spritesheet(`${P}_driver`, F + 'driver_sheet.png', { frameWidth: df[0], frameHeight: df[1] });
     }
-    this.load.spritesheet('scrap', A + 'scrap_sheet.png', { frameWidth: 13, frameHeight: 11 });
+    this.load.spritesheet('scrap', A + 'scrap_sheet.png', { frameWidth: p2.scrap.frame[0], frameHeight: p2.scrap.frame[1] });
+    // distant towers (note 14 previews) and the graffiti near wall (note 2), generated art
+    this.load.spritesheet('p3_towers', A + 'p3/towers_sheet.png', { frameWidth: p2.towers.frame[0], frameHeight: p2.towers.frame[1] });
+    this.load.image('p3_near_wall', A + p2.near_wall.file);
     // phase 2 enemies: dark security drones, graffiti gang drones, smaller Tesla traffic
     const EN = A + 'enemies/';
     for (const k of ['drone_security', 'drone_gang']) {
@@ -49,11 +53,12 @@ export class PreloadScene extends Phaser.Scene {
       this.load.image(k + '_smashed', EN + k + '_smashed.png');
       this.load.spritesheet(k + '_break', EN + k + '_break_sheet.png', { frameWidth: 139, frameHeight: fh + 44 });
     }
-    for (const k of ['hover_white_small', 'hover_black_small']) {
+    // Tesla traffic: tiny versions (clearly smaller than the player's car), sizes from phase2.json
+    for (const t of Object.values(p2.traffic) as any[]) {
+      const k = t.key;
       this.load.image(k, EN + k + '.png');
       this.load.image(k + '_smashed', EN + k + '_smashed.png');
-      const [bw, bh] = k === 'hover_white_small' ? [139, 66] : [140, 67];
-      this.load.spritesheet(k + '_break', EN + k + '_break_sheet.png', { frameWidth: bw, frameHeight: bh });
+      this.load.spritesheet(k + '_break', EN + k + '_break_sheet.png', { frameWidth: t.break[0], frameHeight: t.break[1] });
     }
 
     // --- enemies
@@ -111,9 +116,10 @@ export class PreloadScene extends Phaser.Scene {
       if (b) seq(name + '_break', b.frames, b.frame_ms, 0);
     }
     for (const d of DRIVERS) seq(`${carPrefix(d)}_flame`, 6, 70);
-    seq('scrap', 4, [700, 90, 90, 90]);
+    // scrap pickups: 4 variants, each idles then glints
+    for (let v = 0; v < 4; v++) a.create({ key: `scrap_${v}`, frames: [{ key: 'scrap', frame: v * 2, duration: 900 }, { key: 'scrap', frame: v * 2 + 1, duration: 140 }], repeat: -1 });
     for (const k of ['drone_security', 'drone_gang']) { seq(k + '_fly', 4, 40); seq(k + '_break', 6, 70, 0); }
-    for (const k of ['hover_white_small', 'hover_black_small']) seq(k + '_break', 6, 70, 0);
+    for (const t of Object.values(this.cache.json.get('p2').traffic) as any[]) seq(t.key + '_break', 6, 70, 0);
     seq('drone_fly', 4, m.enemies.drone.fly.frame_ms);
     seq('drone_break', 6, m.enemies.drone.break.frame_ms, 0);
     seq('hover_white_break', 6, m.enemies.hover_white.break.frame_ms, 0);

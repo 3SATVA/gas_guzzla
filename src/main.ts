@@ -9,10 +9,14 @@ import { ShopScene } from './scenes/Shop';
 export const H = 720;
 /** Canvas height is always 720 (= 360 gameplay rows at 2x). The width follows the screen's aspect ratio
  *  (1280..1680, even), so phones and wide desktops are filled edge to edge instead of letterboxed. */
+let minW = 0;
 export function targetW() {
   const a = window.innerWidth / Math.max(1, window.innerHeight);
-  return Math.max(1280, Math.min(1680, Math.round((H * a) / 4) * 4));
+  return Math.max(1280, minW, Math.min(1680, Math.round((H * a) / 4) * 4));
 }
+/** A scene can ask for a wider canvas (the body shop needs room for the native-size car AND the driver side by side).
+ *  The canvas is then shown with the same CSS fit as always (letterboxed top/bottom on narrower screens). */
+export function setMinWidth(w: number) { minW = Math.ceil(w / 4) * 4; fit(); }
 
 const W0 = targetW();
 const game = new Phaser.Game({
@@ -69,3 +73,4 @@ document.addEventListener('fullscreenchange', () => setTimeout(fit, 100));
 
 (window as any).__gg = { game };
 (window as any).__ggFS = () => toggleFullscreen();
+(window as any).__ggMinW = setMinWidth;

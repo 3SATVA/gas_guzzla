@@ -16,10 +16,15 @@ const CAR_W = 128, CAR_H = 72, CAR_CX = 64, CAR_CY = 36;
 const RIG_W = 176, RIG_H = 104, RIG_CX = 88, RIG_CY = 52;
 const MAX_SPEED = 150, START_SPEED = 95, REV_SPEED = -MAX_SPEED / 3;
 const M = 40;
+// note 5: small Teslas in many lanes, both directions, busiest high up (p = chance a slot is filled)
 const LANES = [
-  { y: -322, v: -135 }, // oncoming (faces left)
-  { y: -282, v: 60 },   // same direction (faces right)
-  { y: -242, v: -105 }, // oncoming
+  { y: -346, v: -150, p: 0.85 }, // oncoming (faces left)
+  { y: -324, v: 74, p: 0.8 },    // same direction (faces right)
+  { y: -302, v: -126, p: 0.75 },
+  { y: -280, v: 60, p: 0.65 },
+  { y: -256, v: -108, p: 0.5 },
+  { y: -228, v: 86, p: 0.3 },
+  { y: -192, v: -96, p: 0.15 },
 ];
 const SHOP_FIRST = 2400, SHOP_EVERY = 5600, SHOP_W = 236;
 
@@ -30,7 +35,7 @@ interface Obstacle {
 }
 type DType = 'security' | 'gang';
 interface Drone { type: DType; spr: Phaser.GameObjects.Sprite; wx: number; y: number; vx: number; vy: number; hp: number; mode: 'chase' | 'scrap' | 'flee'; target?: Scrap; w: number; h: number; dead: boolean; t: number; stun: number; }
-interface Traffic { spr: Phaser.GameObjects.Image; key: string; lane: number; wx: number; y: number; v: number; w: number; h: number; dead: boolean; }
+interface Traffic { spr: Phaser.GameObjects.Image; key: string; lane: number; wx: number; y: number; v: number; w: number; h: number; dead: boolean; margin: number; }
 interface Scrap { spr: Phaser.GameObjects.Sprite; wx: number; y: number; value: number; taken: boolean; }
 interface Particle { spr: Phaser.GameObjects.Image; x: number; y: number; vx: number; vy: number; g: number; life: number; flip: number; }
 interface Contact { n: number; sx: number; sy: number; }
@@ -76,6 +81,9 @@ export class LevelScene extends Phaser.Scene {
   arm: { st: 'idle' | 'reach' | 'retract'; t: number; dur: number; target: Scrap | null } = { st: 'idle', t: 0, dur: 0.3, target: null };
   seatFace = 0; seatT = 0; nearT = 0;
   shopHold = 0;
+  wind: { img: Phaser.GameObjects.Image; x: number; y0: number; k: number; a: number; w: number }[] = [];
+  fog: { img: Phaser.GameObjects.Image; x: number; row: number }[] = [];
+  windV = 0;
   state: 'play' | 'totaled' | 'shop' = 'play';
   totaledT = 0; deadVy = 0;
   keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -128,8 +136,10 @@ export class LevelScene extends Phaser.Scene {
       const depth = [0, 1, 3, 5][i];
       this.bg.push(this.makeStrip(key, l.y, l.size[0], l.speed_factor, fy[i], depth));
     });
-    this.makeWallsTexture();
-    this.bg.push(this.makeStrip('p2_walls', -360, 1600, 0.68, 0.68, 4));
+    // note 2: near wall = generated graffiti tenements (reference: Michael's GASGUZLA/background.jpg), native size, with gaps
+    const nw = this.p2.near_wall;
+    this.bg.push(this.makeStrip('p3_near_wall', -360, nw.size[0], 0.68, 0.68, 4));
+    this.makeWind();
     const gs = this.m.collision_layer.pieces.ground_strip;
     this.groundHm = gs.heightmap_top_y; this.groundStep = gs.heightmap_step;
     this.ground = this.makeStrip('ground_strip', GROUND_Y, gs.size[0], 1, 1, 12);
@@ -206,40 +216,74 @@ export class LevelScene extends Phaser.Scene {
     const y = st.y0 - Math.round(scy * st.fy);
     st.imgs.forEach((im, i) => { im.x = x0 + i * st.w; im.y = y; });
   }
-  /** Note 2: a fast "near walls" parallax layer of dark building fronts with gaps that show the city behind. */
-  makeWallsTexture() {
-    if (this.textures.exists('p2_walls')) return;
-    const W = 1600, Hh = 720;
-    const ct = this.textures.createCanvas('p2_walls', W, Hh)!;
-    const g = ct.getContext();
-    const r = new Rng(4242);
-    let x = 0;
-    const faces = ['#2a2321', '#30282a', '#262022', '#2d2620', '#221e20'];
-    while (x < W) {
-      const gap = r.int(34, 130), w = Math.min(W - x - gap, r.int(70, 170));
-      x += gap;
-      if (w < 40) break;
-      const top = r.int(210, 520);
-      const col = r.pick(faces);
-      g.fillStyle = col; g.fillRect(x, top, w, Hh - top);
-      // roof clutter: water tank / antenna / parapet steps
-      g.fillRect(x + 4, top - 4, w - 8, 4);
-      if (r.chance(0.5)) { const ax = x + r.int(8, w - 10); g.fillRect(ax, top - r.int(14, 30), 2, 30); }
-      if (r.chance(0.4)) { const tx = x + r.int(6, w - 26); g.fillRect(tx, top - 16, 18, 12); g.fillRect(tx + 3, top - 4, 2, 4); g.fillRect(tx + 13, top - 4, 2, 4); }
-      // windows: dim orange / teal, sparse, on a grid
-      for (let wy = top + 10; wy < Hh - 6; wy += 12) for (let wx = x + 6; wx < x + w - 8; wx += 10) {
-        const k = r.next();
-        if (k < 0.12) { g.fillStyle = k < 0.03 ? '#4f6f6c' : '#8a5426'; g.fillRect(wx, wy, 4, 5); }
-        else if (k < 0.45) { g.fillStyle = '#1a1617'; g.fillRect(wx, wy, 4, 5); }
+  /** SPEED WIND: soft haze wisps + a drifting fog band between the near wall and the cars/player. Procedural soft alpha,
+   *  drawn at native size (never scaled). They stream past faster the faster you go, settle to almost still at a hover
+   *  stop and drift backward when reversing. Kept faint for readability. */
+  makeWind() {
+    const mk = (key: string, w: number, h: number, draw: (g: CanvasRenderingContext2D) => void) => {
+      if (this.textures.exists(key)) return;
+      const ct = this.textures.createCanvas(key, w, h)!; draw(ct.getContext()); ct.refresh();
+    };
+    const wisp = (w: number, h: number, seed: number) => (g: CanvasRenderingContext2D) => {
+      const r = new Rng(seed); const img = g.createImageData(w, h);
+      const ph = r.range(0, 6.28), bend = r.range(-0.35, 0.35);
+      for (let x = 0; x < w; x++) {
+        const u = x / (w - 1);
+        const env = Math.pow(Math.sin(Math.PI * u), 1.6) * (0.75 + 0.25 * Math.sin(u * 9 + ph)); // tapered both ends, slightly lumpy
+        const cy = h / 2 + bend * h * (u - 0.5) * 2 * (u - 0.5);
+        for (let y = 0; y < h; y++) {
+          const d = (y - cy) / (h * 0.28);
+          const a = env * Math.exp(-d * d);
+          const i = (y * w + x) * 4;
+          img.data[i] = 236; img.data[i + 1] = 206; img.data[i + 2] = 172; img.data[i + 3] = Math.round(255 * a);
+        }
       }
-      // edge light from the smog
-      g.fillStyle = '#4a352a'; g.fillRect(x + w - 2, top, 2, Hh - top);
-      // smog haze toward the street
-      for (let hy = 360; hy < Hh; hy += 4) { g.fillStyle = `rgba(150,78,34,${Math.min(0.55, (hy - 360) / 520)})`; g.fillRect(x, hy, w, 4); }
-      x += w;
+      g.putImageData(img, 0, 0);
+    };
+    mk('p3_wisp_0', 150, 10, wisp(150, 10, 11));
+    mk('p3_wisp_1', 240, 14, wisp(240, 14, 22));
+    mk('p3_wisp_2', 340, 18, wisp(340, 18, 33));
+    mk('p3_wisp_3', 110, 8, wisp(110, 8, 44));
+    // fog band: soft lumpy haze, tiles horizontally (wraps at the edges)
+    mk('p3_fog', 512, 120, (g) => {
+      const W = 512, H = 120, img = g.createImageData(W, H); const r = new Rng(909);
+      const blobs = Array.from({ length: 26 }, () => ({ x: r.range(0, W), y: r.range(30, 90), rx: r.range(40, 110), ry: r.range(12, 30), a: r.range(0.4, 1) }));
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        let a = 0;
+        for (const b of blobs) for (const ox of [-W, 0, W]) { const dx = (x - b.x - ox) / b.rx, dy = (y - b.y) / b.ry; a += b.a * Math.exp(-(dx * dx + dy * dy)); }
+        const i = (y * W + x) * 4; img.data[i] = 214; img.data[i + 1] = 170; img.data[i + 2] = 132; img.data[i + 3] = Math.round(255 * Math.min(1, a) * Math.min(1, Math.sin((Math.PI * y) / H) * 1.4));
+      }
+      g.putImageData(img, 0, 0);
+    });
+    this.wind = [];
+    const r = this.rng;
+    for (let i = 0; i < 18; i++) {
+      const k = r.int(0, 3);
+      const img = this.add.image(0, 0, `p3_wisp_${k}`).setOrigin(0, 0.5).setScrollFactor(0).setDepth(5.5);
+      this.wind.push({ img, x: r.range(-200, 900), y0: r.range(-340, 330), k: r.range(0.95, 1.6), a: r.range(0.55, 1), w: img.width });
     }
-    ct.refresh();
-    ct.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    this.fog = [0, 1, 2, 3, 4, 5].map((i) => ({ img: this.add.image(0, 0, 'p3_fog').setOrigin(0).setScrollFactor(0).setDepth(5.5), x: (i % 3) * 512 + (i >= 3 ? 256 : 0), row: i >= 3 ? 1 : 0 }));
+    this.windV = this.speed;
+  }
+  updateWind(dt: number, scy: number) {
+    // smoothed speed so the haze eases in and out (hover = almost still, reverse = drifts back)
+    this.windV += (this.speed - this.windV) * (1 - Math.exp(-dt * 2.2));
+    const v = this.windV, sp = Math.min(1, Math.abs(v) / MAX_SPEED);
+    const drift = -4; // a whisper of air movement even at a dead hover
+    const span = VW + 420;
+    for (const w of this.wind) {
+      w.x += (-v * w.k + drift) * dt;
+      if (w.x < -w.w - 20) w.x += span; else if (w.x > VW + 400) w.x -= span;
+      const y = ((((w.y0 - scy * 0.85 + 360) % 720) + 720) % 720) - 360; // world-ish vertical parallax, wraps over the 2-screen world
+      w.img.setPosition(Math.round(w.x), Math.round(y + 0));
+      w.img.setAlpha(0.3 * w.a * (0.12 + 0.88 * sp));
+    }
+    for (const f of this.fog) {
+      f.x += (-v * 0.75 + drift * 0.5) * dt;
+      while (f.x < -512) f.x += 3 * 512; while (f.x > 3 * 512 - 512) f.x -= 3 * 512;
+      f.img.setPosition(Math.round(f.x), Math.round(150 + f.row * 140 - scy * 0.8));
+      f.img.setAlpha(0.12 * (0.4 + 0.6 * sp));
+    }
   }
 
   restart() { this.registry.set('levels', [0, 0, 0]); this.scene.restart(); }
@@ -345,20 +389,14 @@ export class LevelScene extends Phaser.Scene {
     return this.addPiece(name, x, roof + 4 - h, 10);
   }
   addScrap(wx: number, y: number, value: number) {
-    const spr = this.add.sprite(Math.round(wx), Math.round(y), 'scrap', 0).setOrigin(0.5).setDepth(14);
-    spr.play({ key: 'scrap', startFrame: this.rng.int(0, 3) });
+    const v = this.rng.int(0, 3);
+    const spr = this.add.sprite(Math.round(wx), Math.round(y), 'scrap', v * 2).setOrigin(0.5).setDepth(14);
+    spr.play({ key: `scrap_${v}`, startFrame: this.rng.int(0, 1) });
     this.scraps.push({ spr, wx, y, value, taken: false });
   }
   /** Note 14: hazy far silhouette of a big tower ahead, drawn between the far and mid skyline layers. */
   addPreview(wx: number, topY: number) {
-    if (!this.textures.exists('p2_preview')) {
-      const ct = this.textures.createCanvas('p2_preview', 30, 150)!; const g = ct.getContext();
-      g.fillStyle = '#5b3a2a'; g.fillRect(4, 10, 22, 140); g.fillRect(0, 30, 30, 120); g.fillRect(13, 0, 3, 12);
-      g.fillStyle = '#6e4630'; g.fillRect(24, 30, 6, 120);
-      g.fillStyle = '#ff3b2a'; g.fillRect(13, 0, 3, 2);
-      ct.refresh(); ct.setFilter(Phaser.Textures.FilterMode.NEAREST);
-    }
-    const img = this.add.image(0, 0, 'p2_preview').setOrigin(0.5, 0).setScrollFactor(0).setDepth(2).setAlpha(0);
+    const img = this.add.image(0, 0, 'p3_towers', this.rng.int(0, this.p2.towers.frames - 1)).setOrigin(0.5, 0).setScrollFactor(0).setDepth(2).setAlpha(0);
     img.setData('top', topY);
     this.previews.push({ img, wx });
   }
@@ -539,18 +577,19 @@ export class LevelScene extends Phaser.Scene {
   updateTraffic(dt: number) {
     LANES.forEach((ln, i) => {
       const st = this.laneState[i];
-      const spawnX = ln.v < 0 || this.speed > ln.v ? this.scroll + VW + 40 : this.scroll - 140;
+      const spawnX = ln.v < 0 || this.speed > ln.v ? this.scroll + VW + 30 : this.scroll - 80;
       const lane = this.traffic.filter((c) => c.lane === i && !c.dead);
       const last = lane.length ? lane.reduce((a, b) => (Math.abs(b.wx - spawnX) < Math.abs(a.wx - spawnX) ? b : a)) : null;
       if (!last || Math.abs(last.wx - spawnX) > st.gap) {
-        const key = this.rng.chance(0.55) ? 'hover_white_small' : 'hover_black_small';
-        const img = this.add.image(0, 0, key).setOrigin(0).setDepth(19).setFlipX(ln.v > 0);
-        const w = key === 'hover_white_small' ? 99 : 100, h = key === 'hover_white_small' ? 26 : 27;
-        this.traffic.push({ spr: img, key, lane: i, wx: spawnX, y: ln.y + this.rng.int(-2, 2), v: ln.v * this.rng.range(0.92, 1.08), w, h, dead: false });
+        if (this.rng.chance(ln.p)) {
+          const t = this.rng.chance(0.55) ? this.p2.traffic.hover_white : this.p2.traffic.hover_black;
+          const img = this.add.image(0, 0, t.key).setOrigin(0).setDepth(19).setFlipX(ln.v > 0);
+          this.traffic.push({ spr: img, key: t.key, lane: i, wx: spawnX, y: ln.y + this.rng.int(-1, 1), v: ln.v * this.rng.range(0.94, 1.06), w: t.size[0], h: t.size[1], dead: false, margin: t.margin });
+        }
         // platoons with Frogger gaps between them (note 12)
         st.left--;
-        if (st.left <= 0) { st.left = this.rng.int(3, 5); st.gap = this.rng.int(300, 460); }
-        else st.gap = this.rng.int(112, 136);
+        if (st.left <= 0) { st.left = this.rng.int(2, 4); st.gap = this.rng.int(230, 400); }
+        else st.gap = this.rng.int(74, 104);
       }
     });
     for (const c of this.traffic) {
@@ -570,10 +609,10 @@ export class LevelScene extends Phaser.Scene {
     this.spark(Math.round(this.px) + ct.sx / ct.n, Math.round(this.py) + ct.sy / ct.n);
     this.time.delayedCall(60, () => {
       const ex = c.spr.x, ey = c.spr.y; c.spr.destroy();
-      const s = this.add.sprite(ex - 20, ey - 20, c.key + '_break', 0).setOrigin(0).setDepth(21).setFlipX(c.v > 0).play(c.key + '_break');
+      const s = this.add.sprite(ex - c.margin, ey - c.margin, c.key + '_break', 0).setOrigin(0).setDepth(21).setFlipX(c.v > 0).play(c.key + '_break');
       s.once('animationcomplete', () => s.destroy());
-      this.explosion(ex + c.w / 2, ey + c.h / 2, 1.5);
-      this.burst('fx_debris', ex + c.w / 2, ey + c.h / 2, 12, this.speed, 160);
+      this.explosion(ex + c.w / 2, ey + c.h / 2, 1);
+      this.burst('fx_debris', ex + c.w / 2, ey + c.h / 2, 7, this.speed, 140);
     });
     this.stats.smashed++;
   }
@@ -735,6 +774,7 @@ export class LevelScene extends Phaser.Scene {
     const scy = Math.round(this.camY);
     cam.scrollX = sc; cam.scrollY = scy;
     for (const l of this.bg) this.placeStrip(l, sc, scy);
+    this.updateWind(dt, scy);
     this.placeStrip(this.ground, sc, scy);
     for (const pv of this.previews) {
       const rel = pv.wx - this.scroll;
@@ -857,7 +897,7 @@ export class LevelScene extends Phaser.Scene {
     // ---- traffic
     for (const t of this.traffic) {
       if (t.dead) continue;
-      const tc = this.contactWithRect(t.wx + 6, t.y + 6, t.w - 12, t.h - 12);
+      const tc = this.contactWithRect(t.wx + 3, t.y + 3, t.w - 6, t.h - 6);
       if (tc.n) { this.smashTraffic(t, tc); if (this.invuln <= 0) { this.damageCar(tc, false); if (this.state !== 'play') return; } }
     }
     // ---- notes 19, 21, 22: the front arm grabs scrap hunnids (only when slow / hovering, takes a beat)
@@ -973,7 +1013,7 @@ export class LevelScene extends Phaser.Scene {
     for (const o of this.obstacles) { g.lineStyle(1, o.kind === 'solid' ? 0xff3030 : 0x30a0ff, o.broken ? 0.2 : 0.8); g.strokeRect(o.x, o.y, o.w, o.h); }
     g.lineStyle(1, 0xff00ff, 0.9);
     for (const d of this.drones) g.strokeRect(d.wx + 25, d.y + 2, 46, d.h - 4);
-    for (const t of this.traffic) g.strokeRect(t.wx + 6, t.y + 6, t.w - 12, t.h - 12);
+    for (const t of this.traffic) g.strokeRect(t.wx + 3, t.y + 3, t.w - 6, t.h - 6);
   }
 
   // ------------------------------------------------------------------ test hooks (tools/*.mjs)

@@ -26,6 +26,6 @@ await p.evaluate(() => { const L = __gg.level; L.invuln = 4; L.autopilot = (s) =
   return { ix: Math.max(-1, Math.min(1, (70 - s.sx) / 40)), iy: Math.max(-1, Math.min(1, ((top + bot) / 2 - 46 - s.py) / 18)) }; }; });
 await wait(3000); await shot('gameplay_seek_clean');
 await p.evaluate(() => { __gg.level.setDamage([1, 2, 3]); __gg.level.invuln = 99; }); await wait(600); await shot('gameplay_seek_damage_b1_m2_f3');
-const ok = info.driver === 'seek' && info.tex.every(k => k.startsWith('seekcar_')) && info.engine === 'seekcar_rear_engine';
+const ok = info.driver === 'seek' && info.tex.every(k => k.startsWith('sm_seek_')) && info.engine === 'sm_seek_rear_engine';
 console.log(ok && !errors.length ? 'SEEK CHECK PASS' : 'SEEK CHECK FAIL', errors.length, 'errors');
 await b.close();

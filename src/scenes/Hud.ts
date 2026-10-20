@@ -23,7 +23,7 @@ export class HudScene extends Phaser.Scene {
     this.cameras.main.setZoom(1).setScroll(0, 0);
     this.flashR = this.add.rectangle(0, 0, 1700, 720, 0xffffff, 1).setOrigin(0).setAlpha(0);
     this.dist = this.add.text(W - 18, 16, '0000 m', { ...FONT, fontSize: '26px', color: '#f2c27a', stroke: '#000', strokeThickness: 6 }).setOrigin(1, 0);
-    this.scrapIcon = this.add.sprite(30, 30, 'scrap', 0).setScale(3).play('scrap');
+    this.scrapIcon = this.add.sprite(30, 30, 'scrap', 6).setScale(2).play('scrap_3');
     this.scrapT = this.add.text(54, 16, 'SCRAP HUNNIDS  0', { ...FONT, fontSize: '24px', color: '#ffd76a', stroke: '#000', strokeThickness: 6 });
     this.spd = this.add.text(W - 18, 50, '', { ...FONT, fontSize: '18px', color: '#9fd8ff', stroke: '#000', strokeThickness: 5 }).setOrigin(1, 0);
     this.prompt = this.add.text(W / 2, 640, '', { ...FONT, fontSize: '20px', color: '#ffe6a8', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);
