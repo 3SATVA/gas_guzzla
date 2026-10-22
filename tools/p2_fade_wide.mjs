@@ -5,7 +5,7 @@ const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args
 const p = await (await b.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 })).newPage();
 const errors = []; p.on('pageerror', (e) => { errors.push(e.message); console.log('[pageerror]', e.message); });
 const wait = (ms) => p.waitForTimeout(ms);
-await p.goto((process.argv[3] || 'http://localhost:4173/') + '?seed=5');
+await p.goto((process.argv[3] || (process.env.BASE || 'http://localhost:4173/')) + '?seed=5');
 await p.waitForFunction(() => window.__gg?.select, null, { timeout: 30000 }); await wait(900);
 console.log('canvas', await p.evaluate(() => ({ w: __gg.game.scale.width, h: __gg.game.scale.height, css: __gg.game.canvas.style.width + 'x' + __gg.game.canvas.style.height })));
 await p.screenshot({ path: `${out}/p2_13_phone_select_fade.png` });

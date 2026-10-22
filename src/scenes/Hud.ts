@@ -43,6 +43,7 @@ export class HudScene extends Phaser.Scene {
     this.plate = this.add.graphics();
     const txt = (color: string) => this.add.text(0, 0, '', { ...FONT, fontSize: '24px', color, stroke: '#000', strokeThickness: 6 });
     this.dist = txt('#f2c27a').setOrigin(1, 0.5).setText('0000 m');
+    // hunnids icon = the rubber-banded stack of dirty $100 bills (pickup art, integer 3x nearest)
     this.scrapIcon = this.add.sprite(0, 0, 'scrap', 6).setScale(3).play('scrap_3');
     this.scrapT = txt('#ffd76a').setOrigin(0, 0.5);
     this.spd = txt('#9fd8ff');
@@ -50,8 +51,8 @@ export class HudScene extends Phaser.Scene {
     this.prompt = this.add.text(W / 2, 640, '', { ...FONT, fontSize: '20px', color: '#ffe6a8', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);
 
     const t1 = this.add.text(W / 2, 290, 'LEVEL 1', { ...FONT, fontSize: '64px', color: '#f2c27a', stroke: '#000', strokeThickness: 10 }).setOrigin(0.5);
-    const t2 = this.add.text(W / 2, 352, 'SMASH THROUGH. GRAB SCRAP. DON\'T GET TOTALED.', { ...FONT, fontSize: '22px', color: '#e8dccb', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);
-    const t3 = this.add.text(W / 2, 700, '\u2191\u2193 / W S fly   \u2022   \u2192 faster   \u2022   \u2190 slow / hover / reverse   \u2022   hover near scrap to grab   \u2022   R restart   \u2022   ESC menu   \u2022   F full screen', { ...FONT, fontSize: '15px', color: '#d9d2c4', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5, 1);
+    const t2 = this.add.text(W / 2, 352, 'SMASH THROUGH. GRAB HUNNIDS. DON\'T GET TOTALED.', { ...FONT, fontSize: '22px', color: '#e8dccb', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);
+    const t3 = this.add.text(W / 2, 700, '\u2191\u2193 / W S fly   \u2022   \u2192 faster   \u2022   \u2190 slow / hover / reverse   \u2022   hover near hunnids to grab   \u2022   R restart   \u2022   ESC menu   \u2022   F full screen', { ...FONT, fontSize: '15px', color: '#d9d2c4', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5, 1);
     this.hint = t3;
     this.tweens.add({ targets: [t1, t2], alpha: 0, delay: 2200, duration: 500, onComplete: () => { t1.destroy(); t2.destroy(); } });
     this.tweens.add({ targets: t3, alpha: 0, delay: 7000, duration: 800, onComplete: () => { t3.destroy(); this.hint = null; } });
@@ -103,7 +104,7 @@ export class HudScene extends Phaser.Scene {
     const barW = (b: { cw: number; gap: number; n: number }) => b.n * (b.cw + b.gap) - b.gap;
     const M = 14, GAPB = phone ? 30 : 26, RH = 76, PAD = 6;
     const measure = (t: Phaser.GameObjects.Text, s: string) => { const o = t.text; t.setText(s); const w = t.width; t.setText(o); return w; };
-    const wScrap = (short: boolean) => 48 + 10 + measure(this.scrapT, short ? 'HUNNIDS 9999' : 'SCRAP HUNNIDS 9999');
+    const wScrap = (_short: boolean) => 60 + 10 + measure(this.scrapT, 'HUNNIDS 9999');
     const wGas = 42 + 10 + Math.max(barW(L.gas), measure(this.gasT, 'GAS 100% LOW!'));
     const wDmg = 128 + 10 + Math.max(barW(L.dmg), measure(this.dmgT, 'TOTALED 100%'));
     const wSpd = Math.max(barW(L.spd), measure(this.spd, 'REV 50')), wDist = measure(this.dist, '0000 m');
@@ -119,7 +120,7 @@ export class HudScene extends Phaser.Scene {
     };
     // row 0: scrap ... right: speed + distance
     let x = M; const y0 = rowY(0), cy0 = y0 + RH / 2;
-    this.scrapIcon.setPosition(x + 24, Math.round(cy0)); this.scrapT.setPosition(x + 58, Math.round(cy0));
+    this.scrapIcon.setPosition(x + 30, Math.round(cy0)); this.scrapT.setPosition(x + 70, Math.round(cy0));
     x += wScrap(short) + GAPB;
     let x2 = rows === 2 ? M : x; const yr = rowY(rows - 1);
     this.gasIcon.setPosition(x2 + 21, Math.round(yr + RH / 2)); block(x2, yr, 42, this.gasT, L.gas); x2 += wGas + GAPB;
@@ -189,7 +190,7 @@ export class HudScene extends Phaser.Scene {
   setScrap(n: number) {
     if (!this.scrapT || n === this.shownScrap) return;
     const up = n > this.shownScrap && this.shownScrap >= 0;
-    this.shownScrap = n; this.scrapT.setText(this.L.shortScrap ? `HUNNIDS ${n}` : `SCRAP HUNNIDS ${n}`);
+    this.shownScrap = n; this.scrapT.setText(`HUNNIDS ${n}`);
     if (up) this.tweens.add({ targets: this.scrapT, scale: 1.15, yoyo: true, duration: 90, onComplete: () => this.scrapT.setScale(1) });
   }
   setSpeed(v: number, max: number) {

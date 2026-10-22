@@ -2,7 +2,7 @@
 // usage: node tools/play.mjs [baseUrl] [--video]
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
-const base = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : 'http://localhost:4173/';
+const base = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : (process.env.BASE || 'http://localhost:4173/');
 const video = process.argv.includes('--video');
 fs.mkdirSync('shots', { recursive: true });
 const b = await chromium.launch({

@@ -19,7 +19,7 @@ const E = (fn, a) => p.evaluate(fn, a);
 const pilot = `(s) => { const ax0 = s.px + 40, ax1 = s.px + 260; let top = -560, bot = s.groundMin(ax0, ax1) - 4;
   for (const o of s.obstacles) { if (o.kind !== 'solid' || o.x > ax1 || o.x + o.w < ax0) continue; if (o.y < top + 40) top = Math.max(top, o.y); else bot = Math.min(bot, o.y); }
   const t = window.__gg.targetY ?? ((top + bot) / 2 - 36); return { ix: window.__gg.ix ?? 0, iy: Math.max(-1, Math.min(1, (t - s.py) / 18)) }; }`;
-await p.goto('http://localhost:4173/?seed=57');
+await p.goto((process.env.BASE || 'http://localhost:4173/') + '?seed=57');
 await p.waitForFunction(() => window.__gg?.select, null, { timeout: 30000 });
 await wait(800);
 if (drv === 'seek') { await p.keyboard.press('ArrowRight'); await wait(800); }

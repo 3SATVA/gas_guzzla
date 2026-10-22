@@ -82,8 +82,8 @@ export class ShopScene extends Phaser.Scene {
     // UI
     this.add.text(24, 12, 'BODY SHOP', { ...FONT, fontSize: '46px', color: '#ff4fa0', stroke: '#2a0010', strokeThickness: 8 });
     this.add.text(300, 30, `${this.driver.toUpperCase()}'S RIDE  \u2022  MOCKUP`, { ...FONT, fontSize: '16px', color: '#d9d2c4', stroke: '#000', strokeThickness: 4 });
-    this.add.sprite(36, 88, 'scrap', 6).setScale(2).play('scrap_3');
-    this.scrapT = this.add.text(60, 74, '', { ...FONT, fontSize: '26px', color: '#ffd76a', stroke: '#000', strokeThickness: 6 });
+    this.add.sprite(40, 88, 'scrap', 6).setScale(2).play('scrap_3'); // stack of $100 bills, integer 2x
+    this.scrapT = this.add.text(66, 74, '', { ...FONT, fontSize: '26px', color: '#ffd76a', stroke: '#000', strokeThickness: 6 });
     this.swapB = this.button(24, 118, '', () => this.swap());
     this.repairB = this.button(24, 166, '', () => this.repair());
     this.button(W - 24, 18, 'CONTINUE \u25B6', () => this.leave(), '#7CFF9A').setOrigin(1, 0);
@@ -124,7 +124,7 @@ export class ShopScene extends Phaser.Scene {
 
   refresh() {
     const dmg = this.levels.reduce((a, b) => a + b, 0);
-    this.scrapT.setText(`SCRAP HUNNIDS  ${this.scrap}`);
+    this.scrapT.setText(`HUNNIDS  ${this.scrap}`);
     this.swapB.setText(`\u21C4 SWAP VIEW:  ${this.view === 'front34' ? 'FRONT 3/4  \u25B8 back' : 'BACK 3/4  \u25B8 front'}   [V]`);
     this.repairB.setText(dmg ? `\u2692 REPAIR  ${dmg} dmg x ${REPAIR_COST} = ${dmg * REPAIR_COST}   [R]` : '\u2692 REPAIR  (no damage)');
     this.repairB.setColor(dmg && this.scrap >= REPAIR_COST ? '#f2c27a' : '#8a7f70');
@@ -148,7 +148,7 @@ export class ShopScene extends Phaser.Scene {
       const i = this.levels.indexOf(Math.max(...this.levels));
       this.levels[i]--; this.scrap -= REPAIR_COST; fixed++;
     }
-    if (!fixed) { this.say(this.levels.some((l) => l > 0) ? 'NOT ENOUGH SCRAP HUNNIDS' : 'NOTHING TO FIX'); return; }
+    if (!fixed) { this.say(this.levels.some((l) => l > 0) ? 'NOT ENOUGH HUNNIDS' : 'NOTHING TO FIX'); return; }
     this.say(`FIXED ${fixed} DAMAGE LEVEL${fixed > 1 ? 'S' : ''}  -${fixed * REPAIR_COST}`);
     this.registry.set('levels', this.levels.slice()); this.registry.set('scrap', this.scrap);
     this.drawCar(); this.refresh();
@@ -157,7 +157,7 @@ export class ShopScene extends Phaser.Scene {
   buy(i: number) {
     const p = PARTS[i];
     if (p.id === 'hook') { this.say('HOOK IS EQUIPPED'); return; }
-    this.say(this.scrap >= p.cost ? `${p.name}: COMING SOON (mockup, nothing spent)` : `${p.name}: NEED ${p.cost - this.scrap} MORE SCRAP HUNNIDS`);
+    this.say(this.scrap >= p.cost ? `${p.name}: COMING SOON (mockup, nothing spent)` : `${p.name}: NEED ${p.cost - this.scrap} MORE HUNNIDS`);
   }
 
   leave() {

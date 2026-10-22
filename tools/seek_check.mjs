@@ -1,7 +1,7 @@
 // Headless check: select Seek -> gameplay with her side-view car; saves screenshots to argv[3]
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
-const base = process.argv[2] || 'http://localhost:4173/';
+const base = process.argv[2] || (process.env.BASE || 'http://localhost:4173/');
 const out = process.argv[3] || '/workspace/gasguzla/cars/seek/review';
 fs.mkdirSync(out, { recursive: true });
 const b = await chromium.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome',

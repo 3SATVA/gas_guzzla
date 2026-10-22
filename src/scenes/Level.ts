@@ -63,7 +63,7 @@ interface Falling { spr: Phaser.GameObjects.Image | Phaser.GameObjects.Rectangle
 type DType = 'security' | 'gang';
 interface Drone { type: DType; spr: Phaser.GameObjects.Sprite; wx: number; y: number; vx: number; vy: number; hp: number; mode: 'chase' | 'scrap' | 'flee'; target?: Scrap; w: number; h: number; dead: boolean; t: number; stun: number; }
 interface Traffic { spr: Phaser.GameObjects.Image; key: string; lane: number; wx: number; y: number; v: number; w: number; h: number; dead: boolean; margin: number; }
-interface Scrap { spr: Phaser.GameObjects.Sprite; wx: number; y: number; value: number; taken: boolean; }
+interface Scrap { spr: Phaser.GameObjects.Sprite; wx: number; y: number; value: number; taken: boolean; ph?: number; }
 interface Particle { spr: Phaser.GameObjects.Image; x: number; y: number; vx: number; vy: number; g: number; life: number; flip: number; }
 interface Contact { n: number; sx: number; sy: number; }
 interface Strip { imgs: Phaser.GameObjects.Image[]; w: number; f: number; fy: number; y0: number; }
@@ -471,7 +471,7 @@ export class LevelScene extends Phaser.Scene {
     const v = this.rng.int(0, 3);
     const spr = this.add.sprite(Math.round(wx), Math.round(y), 'scrap', v * 2).setOrigin(0.5).setDepth(14);
     spr.play({ key: `scrap_${v}`, startFrame: this.rng.int(0, 1) });
-    this.scraps.push({ spr, wx, y, value, taken: false });
+    this.scraps.push({ spr, wx, y, value, taken: false, ph: this.rng.range(0, 6.28) });
   }
   /** Note 14: hazy far silhouette of a big tower ahead, drawn between the far and mid skyline layers. */
   addPreview(wx: number, topY: number) {
@@ -1024,6 +1024,8 @@ export class LevelScene extends Phaser.Scene {
       }
     }
     this.updateBarrels();
+    // hunnids hover-bob (2 px, whole pixels)
+    for (const h of this.scraps) if (!h.taken && h.wx > sc - 30 && h.wx < sc + VW + 30) h.spr.y = Math.round(h.y) + Math.round(Math.sin(this.elapsed * 2.2 + (h.ph ?? 0)) * 2);
     this.updateFalling(dt);
     for (const d of this.drones) if (!d.dead) this.updateDrone(d, dt);
     this.drones = this.drones.filter((d) => {
@@ -1184,7 +1186,7 @@ export class LevelScene extends Phaser.Scene {
       const s = this.scraps.find((s) => !s.taken && near(s, 0));
       if (s) {
         if (slow) { A.st = 'reach'; A.t = 0; A.dur = 0.32 * (1 + 0.6 * frontL); A.target = s; } // note 23: front damage = slower grabs
-        else this.armPrompt = 'SCRAP!  SLOW DOWN TO GRAB IT  (\u25C0)';
+        else this.armPrompt = 'HUNNIDS!  SLOW DOWN TO GRAB IT  (\u25C0)';
       }
     } else if (A.st === 'reach') {
       A.t += dt;
@@ -1193,7 +1195,7 @@ export class LevelScene extends Phaser.Scene {
         if (s && !s.taken && near(s, 10)) {
           s.taken = true; this.scrap += s.value; this.stats.grabbed++;
           this.tweens.add({ targets: s.spr, x: Math.round(tipX), y: Math.round(tipY), alpha: 0, duration: 220, onComplete: () => s.spr.destroy() });
-          this.floatText(s.wx, s.y - 10, `+${s.value} SCRAP`, '#ffd76a');
+          this.floatText(s.wx, s.y - 10, `+${s.value} HUNNIDS`, '#ffd76a');
           this.hud?.setScrap(this.scrap);
         }
         A.st = 'retract'; A.t = 0;

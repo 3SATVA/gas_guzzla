@@ -6,7 +6,7 @@ const out = process.argv[3] || '/workspace/gasguzla/cars/seek/review/phase4';
 const vw = Number(process.argv[4] || 1280), vh = Number(process.argv[5] || 720);
 const mode = process.argv[6] || 'all';
 const tag = `${drv}_${vw}x${vh}`;
-const base = 'http://localhost:4173/';
+const base = (process.env.BASE || 'http://localhost:4173/');
 fs.mkdirSync(out, { recursive: true });
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const p = await (await b.newContext({ viewport: { width: vw, height: vh } })).newPage();

@@ -1,7 +1,7 @@
 // Phase 2 headless check. usage: node tools/p2_check.mjs [base] [outDir] [width] [height]
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
-const base = process.argv[2] || 'http://localhost:4173/';
+const base = process.argv[2] || (process.env.BASE || 'http://localhost:4173/');
 const out = process.argv[3] || '/workspace/gasguzla/cars/seek/review/phase2';
 const vw = Number(process.argv[4] || 1280), vh = Number(process.argv[5] || 720);
 fs.mkdirSync(out, { recursive: true });
