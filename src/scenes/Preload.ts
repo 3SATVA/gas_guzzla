@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { SECTIONS, DRIVERS, carPrefix } from '../game/damage';
+import { liteMode } from '../game/lite';
 
 export class PreloadScene extends Phaser.Scene {
   constructor() { super('Preload'); }
@@ -98,8 +99,17 @@ export class PreloadScene extends Phaser.Scene {
     this.load.image('sel_padlock', S + 'padlock_x4.png');
     this.load.image('sel_locked', S + 'locked_text.png');
     this.load.image('sel_seek_label', S + 'seek_car_placeholder_label.png');
-    this.load.spritesheet('sel_fade_idle', S + 'fade_idle_sheet.png', { frameWidth: 248, frameHeight: 619 });
-    this.load.spritesheet('sel_seek_idle_locked', S + 'seek_idle_locked_sheet.png', { frameWidth: 248, frameHeight: 609 });
+    // approved v2 front-facing select idles (60 frames each). The 4k x 3k grids are split into an even-frame sheet (a)
+    // and an odd-frame sheet (b), 30 frames each (6x5, < 2k x 3.1k). Phones load only (a) and play it at half rate.
+    const lite = liteMode(this.game);
+    this.registry.set('lite', lite);
+    for (const c of ['fade', 'seek']) {
+      const fw = c === 'fade' ? [306, 621] : [283, 613];
+      for (const h of lite ? ['a'] : ['a', 'b']) {
+        this.load.spritesheet(`sel2_${c}_${h}`, S + `v2/${c}_select_idle_${h}.png`, { frameWidth: fw[0], frameHeight: fw[1], endFrame: 29 });
+      }
+    }
+    this.load.json('sel2', S + 'v2/select_v2.json');
     // 20-frame 1133x433 strips, re-packed 1:1 into 3-column grids (tools/regrid.py) so they fit in GPU textures
     const grid = { frameWidth: 1133, frameHeight: 433, endFrame: 19 };
     this.load.spritesheet('sel_car_body', S + 'grid/car34_bounce_body_sheet_grid.png', grid);
@@ -110,7 +120,6 @@ export class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('sel_seek_car_body', A + sb.layers.body, sgrid);
     this.load.spritesheet('sel_seek_car_engine', A + sb.layers.rear_engine, sgrid);
     this.load.spritesheet('sel_seek_car_gear', A + sb.layers.front_gear, sgrid);
-    this.load.spritesheet('sel_seek_idle', S + 'seek_idle_sheet.png', { frameWidth: 248, frameHeight: 609 });
   }
 
   create() {
@@ -138,9 +147,16 @@ export class PreloadScene extends Phaser.Scene {
     seq('fx_explosion', 10, m.fx.explosion.frame_ms, 0);
     seq('fx_spark', 8, m.fx.impact_spark_shards.frame_ms, 0);
     const sel = m.select_screen;
-    seq('sel_fade_idle', 6, sel.fade_group.fade_idle.frame_ms);
-    seq('sel_seek_idle_locked', 6, sel.seek_group.seek_idle.frame_ms);
-    seq('sel_seek_idle', 6, sel.seek_group.seek_idle.frame_ms);
+    const s2 = this.cache.json.get('sel2');
+    for (const c of ['fade', 'seek']) {
+      const ms = s2[c].frame_ms;
+      const frames: Phaser.Types.Animations.AnimationFrame[] = [];
+      for (let i = 0; i < 30; i++) {
+        frames.push({ key: `sel2_${c}_a`, frame: i, duration: this.registry.get('lite') ? ms * 2 : ms });
+        if (!this.registry.get('lite')) frames.push({ key: `sel2_${c}_b`, frame: i, duration: ms });
+      }
+      a.create({ key: `sel2_${c}`, frames, frameRate: 1000 / ms, repeat: -1 });
+    }
     for (const k of ['sel_car_body', 'sel_car_engine', 'sel_car_gear']) seq(k, 20, sel.fade_group.car_bounce.frame_ms);
     for (const k of ['sel_seek_car_body', 'sel_seek_car_engine', 'sel_seek_car_gear']) seq(k, 20, sel.seek_group.car_bounce.frame_ms);
 
@@ -149,7 +165,11 @@ export class PreloadScene extends Phaser.Scene {
     if (q.get('scrap')) this.registry.set('scrap', Number(q.get('scrap')) || 0);
     const drv = q.get('driver');
     if (drv === 'seek' || drv === 'fade') this.registry.set('driver', drv);
+    const fighter = q.get('fighter');
     if (start === 'level' || start === 'shop') this.scene.start('Level');
-    else this.scene.start('Select');
+    else if (start === 'fight') this.scene.start('Fight', { fighter: fighter === 'seek' ? 'seek' : 'fade' });
+    else if (q.get('fight') === '1') this.scene.start('Select', { mode: 'fight' });
+    else if (start === 'select') this.scene.start('Select', { mode: 'drive' });
+    else this.scene.start('Menu');
   }
 }

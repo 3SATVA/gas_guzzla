@@ -1,0 +1,164 @@
+{
+ "tile": [
+  1024,
+  720
+ ],
+ "logical_tile": [
+  512,
+  360
+ ],
+ "scale": "2x nearest (already applied)",
+ "color": [
+  178,
+  153,
+  130
+ ],
+ "blend": "NORMAL (premultiplied alpha; PNG RGB is the flat colour, all shape is in alpha)",
+ "wind_dir": "+x (left to right)",
+ "parallax_note": "stage wall = 1.0; haze is in the air between wall and camera so >= 1.0",
+ "intensity_note": "peaks are ~55% of the density of Michael's PSD example; multiply alpha by up to 1.6 to match his example exactly",
+ "layers": [
+  {
+   "file": "wind_far.png",
+   "from_example": "Layer index 3",
+   "draw_order": "behind fighters",
+   "peak_alpha": 0.26,
+   "parallax_x": 1.0,
+   "wind_speed_px_s": 24,
+   "alpha_breathe": {
+    "amount": 0.15,
+    "period_s": 9.0
+   },
+   "runtime": "tileSprite.tilePositionX = cam.scrollX*parallax - t*wind_speed*gust(t); alpha = base*(1 - amount/2 + amount/2*sin(2*pi*t/period + phase))",
+   "seam_max_alpha_step": 3
+  },
+  {
+   "file": "wind_mid.png",
+   "from_example": "Layer index 2",
+   "draw_order": "behind fighters",
+   "peak_alpha": 0.28,
+   "parallax_x": 1.04,
+   "wind_speed_px_s": 55,
+   "alpha_breathe": {
+    "amount": 0.2,
+    "period_s": 7.0
+   },
+   "runtime": "tileSprite.tilePositionX = cam.scrollX*parallax - t*wind_speed*gust(t); alpha = base*(1 - amount/2 + amount/2*sin(2*pi*t/period + phase))",
+   "seam_max_alpha_step": 3
+  },
+  {
+   "file": "wind_near.png",
+   "from_example": "Layer index 1",
+   "draw_order": "behind fighters (optionally a 2nd copy at alpha*0.5 in front)",
+   "peak_alpha": 0.3,
+   "parallax_x": 1.1,
+   "wind_speed_px_s": 110,
+   "alpha_breathe": {
+    "amount": 0.25,
+    "period_s": 5.5
+   },
+   "runtime": "tileSprite.tilePositionX = cam.scrollX*parallax - t*wind_speed*gust(t); alpha = base*(1 - amount/2 + amount/2*sin(2*pi*t/period + phase))",
+   "seam_max_alpha_step": 3,
+   "gust_tile_scale_x": {
+    "base": 1.0,
+    "gust": 1.35,
+    "note": "near haze tileScaleX lerps to 1.35 with the gust envelope (streaks visibly stretch); far/mid stay 1.0. Only the haze tile is scaled (soft alpha, no hard pixels to break)."
+   }
+  }
+ ],
+ "gust": {
+  "note": "shared by wind layers, streaks and bags",
+  "every_s": [
+   4,
+   8
+  ],
+  "ramp_in_s": 0.6,
+  "hold_s": [
+   0.8,
+   1.6
+  ],
+  "ramp_out_s": 1.4,
+  "speed_mult": 2.2,
+  "alpha_mult": 1.3
+ },
+ "version": 2,
+ "v2_change": "Michael: the wind did not read as moving (constant widths). v2 adds baked gust streaks that stretch, thin, swell and fade while travelling L->R, faster haze scroll, a haze tileScale/alpha pulse on gusts, and more frequent gusts.",
+ "streaks": {
+  "sheets": [
+   "streaks/streak0_sheet.png",
+   "streaks/streak1_sheet.png",
+   "streaks/streak2_sheet.png",
+   "streaks/streak3_sheet.png",
+   "streaks/streak4_sheet.png",
+   "streaks/streak5_sheet.png"
+  ],
+  "frame_logical": [
+   384,
+   32
+  ],
+  "frames": 24,
+  "draw_scale": 2,
+  "filter": "NEAREST",
+  "fps": 24,
+  "life_s": 1.0,
+  "layout": "vertical strip: frame i at y=i*32 (logical); RGB flat (178, 153, 130), shape in alpha (peak 0.55)",
+  "anim": "frame = floor(age*24*rate); the frames themselves do the stretch (35%->120% length), thinning with one swell pulse, and fade in/out; despawn after frame 23",
+  "pool": 24,
+  "classes": [
+   {
+    "name": "far",
+    "y_range": [
+     140,
+     420
+    ],
+    "speed_px_s": [
+     180,
+     260
+    ],
+    "rate": [
+     0.8,
+     1.0
+    ],
+    "alpha": 0.7,
+    "spawn_every_s": [
+     0.3,
+     0.6
+    ],
+    "gust_spawn_every_s": [
+     0.1,
+     0.2
+    ],
+    "parallax": 1.02,
+    "draw": "after wind:0"
+   },
+   {
+    "name": "near",
+    "y_range": [
+     330,
+     640
+    ],
+    "speed_px_s": [
+     380,
+     560
+    ],
+    "rate": [
+     0.9,
+     1.2
+    ],
+    "alpha": 1.0,
+    "spawn_every_s": [
+     0.35,
+     0.7
+    ],
+    "gust_spawn_every_s": [
+     0.08,
+     0.16
+    ],
+    "parallax": 1.08,
+    "draw": "after wind:2 (behind fighters)"
+   }
+  ],
+  "runtime": "x += speed*gust(t)*dt (screen space, spawn at x=-200 or anywhere along the band); alpha = class.alpha*(1+(gust-1)*0.3); random hflip OFF (head must lead to the right); random vflip ok",
+  "cost": "<=24 sprites (~5 alive per class calm, ~12 in a gust), 6 sheets of 384x768 logical RGBA (~7 MB GPU total)"
+ }
+}

@@ -1,0 +1,22 @@
+{
+ "file": "alley_v6.png",
+ "size": [
+  1920,
+  720
+ ],
+ "logical": [
+  960,
+  360
+ ],
+ "scale": "2x nearest",
+ "source": "stage/wind/wind.psd bottom layer (layer_00.png, Michael's own background; already 1920 wide with the car/tent/rubble arrangement he painted, so no AI side extension was needed - same 1920x720 frame as alley_v5)",
+ "pipeline": "INTER_AREA to 960x360 -> linear black lift (input 26.1 -> 41, white fixed) -> 256-colour MEDIANCUT, no dither -> 2x nearest",
+ "black_floor": 42,
+ "luma_pct_1_50": [
+  45.7,
+  76.0
+ ],
+ "feet_y": 690,
+ "floor_note": "fighters stand at y=690 (screen px); middle floor (x ~420..1500, y 600..720) is open ground - rubble stays at the far left and the tent/building at the right",
+ "parallax": "single layer; wind tiles + bags from stage/wind/out drawn above it, fighters above those"
+}

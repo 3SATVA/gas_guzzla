@@ -1,0 +1,38 @@
+{
+ "fade": {
+  "frame": [
+   306,
+   621
+  ],
+  "frames": 60,
+  "frame_ms": 83,
+  "screen_pos": [
+   569,
+   93
+  ],
+  "feet_anchor_screen": [
+   724,
+   712
+  ],
+  "half_frames": 30,
+  "note": "a = even frames, b = odd frames; desktop interleaves a/b at frame_ms, phones play a only at 2*frame_ms"
+ },
+ "seek": {
+  "frame": [
+   283,
+   613
+  ],
+  "frames": 60,
+  "frame_ms": 83,
+  "screen_pos": [
+   599,
+   101
+  ],
+  "feet_anchor_screen": [
+   718,
+   712
+  ],
+  "half_frames": 30,
+  "note": "a = even frames, b = odd frames; desktop interleaves a/b at frame_ms, phones play a only at 2*frame_ms"
+ }
+}

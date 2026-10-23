@@ -1,0 +1,214 @@
+{
+ "0": {
+  "src_crop": [
+   412,
+   128,
+   863,
+   563
+  ],
+  "frames": 144,
+  "fps": 24,
+  "color_gain": [
+   1.017,
+   1.01,
+   1.022
+  ],
+  "tiers": {
+   "S": {
+    "cell": [
+     36,
+     35
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag0_S_sheet.png"
+   },
+   "M": {
+    "cell": [
+     60,
+     58
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag0_M_sheet.png"
+   },
+   "L": {
+    "cell": [
+     96,
+     93
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag0_L_sheet.png"
+   },
+   "XL": {
+    "cell": [
+     144,
+     139
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag0_XL_sheet.png"
+   }
+  }
+ },
+ "1": {
+  "src_crop": [
+   384,
+   72,
+   899,
+   617
+  ],
+  "frames": 144,
+  "fps": 24,
+  "color_gain": [
+   1.009,
+   1.007,
+   1.015
+  ],
+  "tiers": {
+   "S": {
+    "cell": [
+     34,
+     36
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag1_S_sheet.png"
+   },
+   "M": {
+    "cell": [
+     57,
+     60
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag1_M_sheet.png"
+   },
+   "L": {
+    "cell": [
+     91,
+     96
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag1_L_sheet.png"
+   },
+   "XL": {
+    "cell": [
+     136,
+     144
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag1_XL_sheet.png"
+   }
+  }
+ },
+ "2": {
+  "src_crop": [
+   304,
+   42,
+   927,
+   605
+  ],
+  "frames": 144,
+  "fps": 24,
+  "color_gain": [
+   1.018,
+   1.012,
+   1.019
+  ],
+  "tiers": {
+   "S": {
+    "cell": [
+     36,
+     33
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag2_S_sheet.png"
+   },
+   "M": {
+    "cell": [
+     60,
+     54
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag2_M_sheet.png"
+   },
+   "L": {
+    "cell": [
+     96,
+     87
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag2_L_sheet.png"
+   },
+   "XL": {
+    "cell": [
+     144,
+     130
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag2_XL_sheet.png"
+   }
+  }
+ },
+ "3": {
+  "src_crop": [
+   408,
+   132,
+   887,
+   591
+  ],
+  "frames": 144,
+  "fps": 24,
+  "color_gain": [
+   1.011,
+   1.007,
+   1.017
+  ],
+  "tiers": {
+   "S": {
+    "cell": [
+     36,
+     34
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag3_S_sheet.png"
+   },
+   "M": {
+    "cell": [
+     60,
+     57
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag3_M_sheet.png"
+   },
+   "L": {
+    "cell": [
+     96,
+     92
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag3_L_sheet.png"
+   },
+   "XL": {
+    "cell": [
+     144,
+     138
+    ],
+    "cols": 12,
+    "rows": 12,
+    "sheet": "bag3_XL_sheet.png"
+   }
+  }
+ }
+}

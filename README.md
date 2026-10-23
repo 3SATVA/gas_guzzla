@@ -34,7 +34,21 @@ The output is fully static, and Vite uses `base: './'`, so it works from any pat
 | Damage debug HUD + hitboxes | D | – |
 | Back to select | Esc | – |
 
-Only Fade can be picked. Seek is LOCKED, so trying to pick her shakes the panel.
+### Fight mode (main menu → FIGHT, or `?fight=1`)
+
+Pick Fade or Seek, then fight the CPU Heavy Cylobot, best of 3 (99 s rounds).
+
+| | Keyboard | Touch |
+|---|---|---|
+| Walk forward / back | ← → / A D | ◀ ▶ pad |
+| Crouch (ducks the Cylobot's high punch) | ↓ / S (hold) | ▼ |
+| Punch (Fade: jab combo; Seek: horizontal kick) | J / Z | PUNCH / KICK |
+| Kick (Fade: kick; Seek: high kick) | K / X | KICK / HIGH |
+| Block (hold) | L / C / Shift | BLOCK |
+| Rematch on the win screen | R / Enter | REMATCH |
+| Back to pick | Esc | PICK ↩ |
+
+URL flags: `?scene=fight&fighter=fade|seek` jumps straight in, `?lite=1` / `?full=1` force the phone/desktop texture set, `?touch=1` shows the touch buttons on desktop, `?bag=front` spawns the rare front bag early.
 
 ## How it is put together
 
