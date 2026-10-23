@@ -27,8 +27,8 @@ The output is fully static, and Vite uses `base: './'`, so it works from any pat
 
 | | Keyboard | Touch / mouse |
 |---|---|---|
-| Select: browse drivers | ← → / A D | swipe, or tap the left/right screen edge |
-| Select: choose | Enter / Space | tap the middle |
+| Select: highlight Fade / Seek (both on screen) | ← → / A D | tap a character, or swipe |
+| Select: choose | Enter / Space | tap the highlighted character again, or tap GO |
 | Fly | Arrows / WASD (up/down freely, some forward/back) | hold and drag; the car steers toward your finger |
 | Restart level | R | tap after TOTALED |
 | Damage debug HUD + hitboxes | D | – |
@@ -71,5 +71,7 @@ URL flags: `?scene=fight&fighter=fade|seek` jumps straight in, `?lite=1` / `?ful
 - `tools/play.mjs`: headless Chromium play-through that saves screenshots to `shots/`. Add `--video` to record `shots/gameplay.webm`, then convert it to mp4 with ffmpeg.
 - `tools/soak.mjs`: passability soak with an avoid-only autopilot and no enemies.
 - `tools/regrid.py`: the pixel-exact re-pack of the wide select sheets.
+- `tools/build_select_bg_cars.py`: the side-by-side select's background cars, each frame's approved layers composited and reduced by exactly 1/2 (2x2 box, premultiplied alpha). The characters are never resampled.
+- `tools/select_check.mjs`: headless check of the select screen (both states, fight with each, drive to level, phone tap/GO).
 
 Run these against `npm run preview` (port 4173). They need `/usr/bin/google-chrome` or `CHROME=...`.

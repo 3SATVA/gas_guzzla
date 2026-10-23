@@ -110,16 +110,11 @@ export class PreloadScene extends Phaser.Scene {
       }
     }
     this.load.json('sel2', S + 'v2/select_v2.json');
-    // 20-frame 1133x433 strips, re-packed 1:1 into 3-column grids (tools/regrid.py) so they fit in GPU textures
-    const grid = { frameWidth: 1133, frameHeight: 433, endFrame: 19 };
-    this.load.spritesheet('sel_car_body', S + 'grid/car34_bounce_body_sheet_grid.png', grid);
-    this.load.spritesheet('sel_car_engine', S + 'grid/car34_bounce_rear_engine_sheet_grid.png', grid);
-    this.load.spritesheet('sel_car_gear', S + 'grid/car34_bounce_front_gear_sheet_grid.png', grid);
-    const sb = m.select_screen.seek_group.car_bounce;
-    const sgrid = { frameWidth: sb.frame_size[0], frameHeight: sb.frame_size[1], endFrame: sb.frames - 1 };
-    this.load.spritesheet('sel_seek_car_body', A + sb.layers.body, sgrid);
-    this.load.spritesheet('sel_seek_car_engine', A + sb.layers.rear_engine, sgrid);
-    this.load.spritesheet('sel_seek_car_gear', A + sb.layers.front_gear, sgrid);
+    // side-by-side select: both cars as exact 1/2 background composites (tools/build_select_bg_cars.py), 20 frames, 5x4 grids
+    this.load.spritesheet('selc_fade', S + 'v2/fade_car_half_sheet.png', { frameWidth: 567, frameHeight: 217, endFrame: 19 });
+    this.load.spritesheet('selc_seek', S + 'v2/seek_car_half_sheet.png', { frameWidth: 603, frameHeight: 262, endFrame: 19 });
+    this.load.image('sel_logo1', S + 'logo_gas_guzzla.png');
+    this.load.image('sel_spot', S + 'spotlight.png');
   }
 
   create() {
@@ -157,8 +152,8 @@ export class PreloadScene extends Phaser.Scene {
       }
       a.create({ key: `sel2_${c}`, frames, frameRate: 1000 / ms, repeat: -1 });
     }
-    for (const k of ['sel_car_body', 'sel_car_engine', 'sel_car_gear']) seq(k, 20, sel.fade_group.car_bounce.frame_ms);
-    for (const k of ['sel_seek_car_body', 'sel_seek_car_engine', 'sel_seek_car_gear']) seq(k, 20, sel.seek_group.car_bounce.frame_ms);
+    seq('selc_fade', 20, sel.fade_group.car_bounce.frame_ms);
+    seq('selc_seek', 20, sel.seek_group.car_bounce.frame_ms);
 
     const q = new URLSearchParams(location.search);
     const start = q.get('scene');

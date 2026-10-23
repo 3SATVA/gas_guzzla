@@ -1,17 +1,24 @@
 import Phaser from 'phaser';
 
-const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+type Id = 'fade' | 'seek';
+interface Slot {
+  id: Id; cx: number; hit: Phaser.Geom.Rectangle;
+  char: Phaser.GameObjects.Sprite; car: Phaser.GameObjects.Sprite; name: Phaser.GameObjects.Image;
+  glow?: Phaser.FX.Glow; lit: number;
+}
 
-/** Character select, authored natively at 1280x720 (camera zoom 1). */
+/** Character select, authored at 1280x720 (camera zoom 1). Fade and Seek stand side by side at native size
+ * (v2 idles, never resampled); their cars sit smaller behind them (exact 1/2 composites) to read as further back.
+ * Used for both the drive select and the fight pick. */
 export class SelectScene extends Phaser.Scene {
-  private groups: Phaser.GameObjects.Container[] = [];
+  private slots: Slot[] = [];
   private index = 0;
-  private swiping = false;
-  private shaking = false;
   private leaving = false;
-  private hint!: Phaser.GameObjects.Text;
-  /** 'drive' = pick a driver for the car game, 'fight' = pick a fighter for the 1v1 (same screen, fighters in front of their cars) */
   private mode: 'drive' | 'fight' = 'drive';
+  private arrow!: Phaser.GameObjects.Text;
+  private pool!: Phaser.GameObjects.Image;
+  private goTxt!: Phaser.GameObjects.Text;
+  private goBox!: Phaser.GameObjects.Rectangle;
 
   constructor() { super('Select'); }
 
@@ -19,62 +26,60 @@ export class SelectScene extends Phaser.Scene {
 
   create() {
     const s2 = this.cache.json.get('sel2');
-    const m = this.cache.json.get('manifest');
-    const sel = m.select_screen;
-    const L = sel.layout;
-    this.index = this.registry.get(this.mode === 'fight' ? 'fighter' : 'driver') === 'seek' ? 1 : 0; this.swiping = false; this.shaking = false; this.leaving = false;
+    this.index = this.registry.get(this.mode === 'fight' ? 'fighter' : 'driver') === 'seek' ? 1 : 0;
+    this.leaving = false;
     const off = Math.round((this.scale.width - 1280) / 2);
     this.cameras.main.setZoom(1).setScroll(-off, 0).setBackgroundColor('#000');
     this.cameras.main.fadeIn(250, 0, 0, 0);
 
     this.add.image(0, 0, 'sel_bg').setOrigin(0);
-    // wide screens: mirrored copies of the approved backdrop fill the extra width (no resampling)
     this.add.image(-1280, 0, 'sel_bg').setOrigin(0).setFlipX(true);
     this.add.image(1280, 0, 'sel_bg').setOrigin(0).setFlipX(true);
     this.scale.on('resize', this.onResize, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off('resize', this.onResize, this));
 
-    // ---- Fade group: car body -> rear engine -> front gear (all bounce sheets share one canvas), Fade idle, name
-    const fg = L.fade_group;
-    const fade = this.add.container(0, 0);
-    const [cx, cy] = fg.car_frame_pos;
-    for (const k of ['sel_car_body', 'sel_car_engine', 'sel_car_gear']) {
-      fade.add(this.add.sprite(cx, cy, k, 0).setOrigin(0).play(k));
-    }
-    // approved v2 front-facing idle at its authored screen position (1:1, never resampled)
-    fade.add(this.add.sprite(s2.fade.screen_pos[0], s2.fade.screen_pos[1], 'sel2_fade_a', 0).setOrigin(0).play('sel2_fade'));
-    fade.add(this.add.image(fg.name_pos[0], fg.name_pos[1], 'sel_name_fade').setOrigin(0));
+    const lite = !!this.registry.get('lite');
+    const feetY = 712, carBottom = 566;
+    const defs: { id: Id; cx: number }[] = [{ id: 'fade', cx: 330 }, { id: 'seek', cx: 952 }];
+    // cars (background, smaller = further back), a light haze over them, then the floor light and characters
+    const cars = defs.map(({ id, cx }) => {
+      const t = this.textures.get('selc_' + id).get(0);
+      return this.add.sprite(cx - Math.round(t.width / 2), carBottom - t.height, 'selc_' + id, 0).setOrigin(0).play('selc_' + id);
+    });
+    this.add.rectangle(-1280, 0, 3840, 720, 0x0b0a10, 0.22).setOrigin(0);
+    this.pool = this.add.image(0, 716, 'sel_spot').setOrigin(0.5, 1).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.45);
+    this.slots = defs.map(({ id, cx }, i) => {
+      const d = s2[id];
+      const ax = d.feet_anchor_screen[0] - d.screen_pos[0], ay = d.feet_anchor_screen[1] - d.screen_pos[1];
+      const x = cx - ax, y = feetY - ay; // integer positions, 1:1 pixels
+      const char = this.add.sprite(x, y, `sel2_${id}_a`, 0).setOrigin(0).play(`sel2_${id}`);
+      const nt = this.textures.get(id === 'fade' ? 'sel_name_fade' : 'sel_name_seek').get();
+      const name = this.add.image(cx - Math.round(nt.width / 2), 28, id === 'fade' ? 'sel_name_fade' : 'sel_name_seek').setOrigin(0);
+      let glow: Phaser.FX.Glow | undefined;
+      if (!lite && char.preFX) glow = char.preFX.addGlow(0xf2c27a, 0, 0, false, 0.25, 8);
+      return { id, cx, char, car: cars[i], name, glow, lit: i === this.index ? 1 : 0,
+        hit: new Phaser.Geom.Rectangle(x - 20, y, d.frame[0] + 40, d.frame[1]) };
+    });
 
-    // ---- Seek group: her Trans Am (body -> blue anti-grav engine -> hooks bounce sheets), Seek idle, name
-    const sg = L.seek_group;
-    const seek = this.add.container(Math.max(L.carousel.offscreen_right_x, this.scale.width), 0);
-    for (const k of ['sel_seek_car_body', 'sel_seek_car_engine', 'sel_seek_car_gear']) {
-      seek.add(this.add.sprite(sg.car_frame_pos[0], sg.car_frame_pos[1], k, 0).setOrigin(0).play(k));
-    }
-    seek.add(this.add.sprite(s2.seek.screen_pos[0], s2.seek.screen_pos[1], 'sel2_seek_a', 0).setOrigin(0).play('sel2_seek'));
-    seek.add(this.add.image(sg.name_pos[0], sg.name_pos[1], 'sel_name_seek').setOrigin(0));
-    this.groups = [fade, seek];
-    if (this.index === 1) { fade.x = -Math.max(L.carousel.offscreen_right_x, this.scale.width); seek.x = 0; }
-
-    // ---- UI: drawn last, never moves
-    this.add.image(L.ui.logo_pos[0], L.ui.logo_pos[1], 'sel_logo').setOrigin(0);
-    if (this.mode === 'drive') this.add.image(L.ui.select_your_driver_pos[0], L.ui.select_your_driver_pos[1], 'sel_title').setOrigin(0);
-    else this.add.text(L.ui.select_your_driver_pos[0], L.ui.select_your_driver_pos[1] + 4, 'CHOOSE YOUR FIGHTER', {
-      fontFamily: 'monospace', fontSize: '30px', fontStyle: 'bold', color: '#f2c27a', stroke: '#000', strokeThickness: 6,
-    }).setOrigin(0);
-    this.hint = this.add.text(18, 692, '', {
-      fontFamily: 'monospace', fontSize: '18px', fontStyle: 'bold', color: '#f2c27a', stroke: '#000', strokeThickness: 4,
-    }).setOrigin(0, 0.5);
-    this.add.text(18, 202, '\u25C0  \u25B6  CHOOSE', { fontFamily: 'monospace', fontSize: '16px', fontStyle: 'bold', color: '#d9d2c4', stroke: '#000', strokeThickness: 4 }).setOrigin(0, 0);
+    // ---- UI
+    this.add.image(640 - 149, 8, 'sel_logo1').setOrigin(0);
+    const title = this.mode === 'fight' ? 'CHOOSE YOUR FIGHTER' : 'SELECT YOUR DRIVER';
+    this.add.text(640, 102, title, { fontFamily: 'monospace', fontSize: '24px', fontStyle: 'bold', color: '#f2c27a', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5, 0);
+    this.arrow = this.add.text(0, 76, '\u25BC', { fontFamily: 'monospace', fontSize: '20px', fontStyle: 'bold', color: '#f2c27a', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5, 0);
+    this.goBox = this.add.rectangle(640, 612, 188, 60, 0x1a1410, 0.85).setStrokeStyle(3, 0xf2c27a);
+    this.goTxt = this.add.text(640, 612, '', { fontFamily: 'monospace', fontSize: '26px', fontStyle: 'bold', color: '#f2c27a', stroke: '#000', strokeThickness: 5 }).setOrigin(0.5);
+    this.add.text(640, 690, '\u25C0 \u25B6 / TAP  CHOOSE    ENTER  GO    ESC  MENU', { fontFamily: 'monospace', fontSize: '14px', fontStyle: 'bold', color: '#d9d2c4', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5);
     this.add.text(1262, 24, 'MENU \u21A9', { fontFamily: 'monospace', fontSize: '18px', fontStyle: 'bold', color: '#d9d2c4', stroke: '#000', strokeThickness: 4 }).setOrigin(1, 0.5);
-    this.updateHint();
+    this.tweens.add({ targets: this.arrow, y: 82, duration: 420, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    this.tweens.add({ targets: this.goBox, alpha: 0.6, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    this.refresh(true);
 
     // ---- input
     const kb = this.input.keyboard!;
-    kb.on('keydown-LEFT', () => this.swipe(-1));
-    kb.on('keydown-A', () => this.swipe(-1));
-    kb.on('keydown-RIGHT', () => this.swipe(1));
-    kb.on('keydown-D', () => this.swipe(1));
+    kb.on('keydown-LEFT', () => this.pick(0));
+    kb.on('keydown-A', () => this.pick(0));
+    kb.on('keydown-RIGHT', () => this.pick(1));
+    kb.on('keydown-D', () => this.pick(1));
     kb.on('keydown-ENTER', () => this.choose());
     kb.on('keydown-SPACE', () => this.choose());
     kb.on('keydown-ESC', () => this.back());
@@ -83,47 +88,52 @@ export class SelectScene extends Phaser.Scene {
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { downX = p.worldX; downT = p.time; });
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
       const dx = p.worldX - downX;
-      if (Math.abs(dx) > 60 && p.time - downT < 600) { this.swipe(dx < 0 ? 1 : -1); return; }
+      if (Math.abs(dx) > 60 && p.time - downT < 600) { this.pick(dx < 0 ? 1 : 0); return; }
       if (p.worldY < 64 && p.worldX > 1110) { this.back(); return; }
-      // tap: edges swipe, middle chooses
-      if (p.worldX < 120) this.swipe(-1);
-      else if (p.worldX > 1160) this.swipe(1);
-      else this.choose();
+      if (this.goBox.getBounds().contains(p.worldX, p.worldY)) { this.choose(); return; }
+      const i = this.slots.findIndex((s) => s.hit.contains(p.worldX, p.worldY));
+      const j = i >= 0 ? i : p.worldX < 640 ? 0 : 1;
+      if (j === this.index) this.choose(); else this.pick(j);
     });
     (window as any).__gg.select = this;
   }
 
   private onResize() { this.cameras.main.setScroll(-Math.round((this.scale.width - 1280) / 2), 0); }
 
-  private updateHint() {
-    const verb = this.mode === 'fight' ? 'FIGHT' : 'DRIVE';
-    this.hint.setText(`ENTER / TAP  -  ${verb} AS ${this.index === 0 ? 'FADE' : 'SEEK'}     ESC - MENU`);
+  /** apply the highlight; each slot's `lit` tweens 0..1 */
+  private refresh(instant = false) {
+    this.goTxt.setText(`${this.mode === 'fight' ? 'FIGHT' : 'DRIVE'} \u25B6`);
+    const cur = this.slots[this.index];
+    this.arrow.x = cur.cx;
+    this.pool.x = cur.cx;
+    for (const [i, s] of this.slots.entries()) {
+      const to = i === this.index ? 1 : 0;
+      this.tweens.killTweensOf(s);
+      if (instant) { s.lit = to; this.paint(s); }
+      else this.tweens.add({ targets: s, lit: to, duration: 180, ease: 'Sine.out', onUpdate: () => this.paint(s) });
+    }
   }
 
-  swipe(dir: number) {
-    if (this.swiping || this.leaving) return;
-    const next = this.index + dir;
-    if (next < 0 || next >= this.groups.length) return;
-    const car = this.cache.json.get('manifest').select_screen.carousel;
-    const cur = this.groups[this.index];
-    const nxt = this.groups[next];
-    const W = Math.max(car.offscreen_right_x, this.scale.width); // off-screen even on wide canvases
-    nxt.x = dir > 0 ? W : -W;
-    this.swiping = true;
-    this.tweens.addCounter({
-      from: 0, to: 1, duration: car.duration_ms, ease: (t: number) => t,
-      onUpdate: (tw) => {
-        const e = easeOutCubic(tw.getValue() ?? 0);
-        cur.x = Math.round(-dir * W * e);
-        nxt.x = Math.round(dir * W * (1 - e));
-      },
-      onComplete: () => { cur.x = -dir * W; nxt.x = 0; this.index = next; this.swiping = false; this.updateHint(); },
-    });
+  private paint(s: Slot) {
+    const k = s.lit;
+    const c = (lo: number, hi: number) => Math.round(lo + (hi - lo) * k);
+    const ch = c(0x66, 0xff); s.char.setTint(Phaser.Display.Color.GetColor(ch, ch, c(0x6e, 0xff)));
+    const cr = c(0x5a, 0xb8); s.car.setTint(Phaser.Display.Color.GetColor(cr, cr, c(0x64, 0xc0)));
+    s.name.setAlpha(0.45 + 0.55 * k);
+    if (s.glow) s.glow.outerStrength = 1.6 * k;
   }
+
+  /** select slot i (0 = Fade, 1 = Seek); swipe(dir) kept for older tools */
+  pick(i: number) {
+    if (this.leaving || i === this.index || i < 0 || i >= this.slots.length) return;
+    this.index = i;
+    this.refresh();
+  }
+  swipe(dir: number) { this.pick(this.index + dir); }
 
   choose() {
-    if (this.swiping || this.leaving) return;
-    const who = this.index === 0 ? 'fade' : 'seek';
+    if (this.leaving) return;
+    const who = this.slots[this.index].id;
     this.registry.set(this.mode === 'fight' ? 'fighter' : 'driver', who);
     this.leaving = true;
     this.cameras.main.fadeOut(300, 0, 0, 0);
