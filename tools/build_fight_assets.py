@@ -76,6 +76,35 @@ def load_move(cdir, spec):
                 loop=bool(m.get('loop', False)) or mv.startswith('walk') or mv == 'idle')
 
 
+def apply_seek_edl(moves):
+    """Michael's Premiere edit: keep only the frames he kept; reverse / ping-pong / holds are playback order (the same atlas keys repeat).
+    idle = ping-pong 0-9 | crouch = descent (kept frames reversed) + rise, hold on the bottom | block = guard-up 0,1,3,5 (hold on 5) then reversed out
+    hit = FIRST SECTION of the knockdown (0-4, 4 = recoil peak) then reversed back to her stance | getup without frame 0 | no separate hit clip."""
+    import sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from seek_edl import FIGHT
+    def pick(mv, ids): return [dict(mv['frames'][i]) for i in ids]
+    out = {}
+    for n in ('walk_fwd', 'walk_back', 'kick_b', 'kick'):
+        mv = dict(moves[n])
+        if n != 'walk_back': mv['frames'] = pick(mv, FIGHT[n])
+        out[n] = mv
+    mv = dict(moves['idle']); a = FIGHT['idle']; mv['frames'] = pick(mv, a + a[-2:0:-1]); out['idle'] = mv
+    mv = dict(moves['crouch']); a = FIGHT['crouch']; ids = a[:0:-1] + a                 # 25..13, 12 (bottom), 13..25
+    mv['frames'] = pick(mv, ids); mv['hold'] = len(a) - 1; mv['exit_idle'] = 0; mv['enter_idle'] = 0; out['crouch'] = mv
+    mv = dict(moves['block']); a = FIGHT['block']; ids = a + a[-2::-1]                  # 0 1 3 5 3 1 0
+    mv['frames'] = pick(mv, ids); mv['hold'] = len(a) - 1; mv['exit_idle'] = 0; mv['enter_idle'] = 0; out['block'] = mv
+    mv = dict(moves['knockdown']); mv['frames'] = pick(mv, FIGHT['knockdown']); out['knockdown'] = mv
+    mv = dict(moves['getup']); mv['frames'] = pick(mv, FIGHT['getup']); mv['exit_idle'] = 0; out['getup'] = mv
+    kd = moves['knockdown']; a = FIGHT['hurt']; ids = a + a[-2::-1]
+    hf = []
+    for j, i in enumerate(ids):
+        f = dict(kd['frames'][i]); f['ticks'] = 3; f['adv'] = 0; f['hitbox'] = None; f['inv'] = False; f['state'] = 'hitstun'
+        if j == len(a) - 1: f['ticks'] = 5          # dwell on the recoil peak
+        hf.append(f)
+    mv = dict(kd); mv.update(frames=hf, hold=None, loop=False, end_dx=0, exit_idle=0, enter_idle=0); out['hit'] = mv
+    return out
+
+
 def trim(path):
     im = Image.open(path).convert('RGBA')
     a = np.array(im)
@@ -116,6 +145,7 @@ def lite_frames(mv):
 
 def build_char(name, spec, mode):
     moves = {k: load_move(spec['dir'], v) for k, v in spec['moves'].items()}
+    if name == 'seek': moves = apply_seek_edl(moves)
     imgs = {}   # hash -> (key, trimmed)
     cache = {}
     def key_for(path, prefix):

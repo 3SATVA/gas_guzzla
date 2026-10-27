@@ -1,16 +1,16 @@
 """Pack the Seek mock-level art into public/assets/mock/ (pixel exact, no resampling).
 
-  seek/<full|lite>/  atlas of the always-needed clips in brawler/v1/seek_sprites_v4 (13 clips: idle, walk_loop, guard, pocket, cam + fwd spray; walk_start was removed) + clips.json
+  seek/<full|lite>/  atlas of the always-needed clips (idle_a, walk_loop, guard, pocket, cam + fwd spray) holding ONLY the unique frames Michael kept in his Premiere edit (tools/seek_edl.py); reverse / ping-pong / freeze are frame-key lists in clips.json
                      (frames, fps, loop, anchor, and the can-nozzle 'tip' per frame for the spray clips).
                      lite = every 2nd frame of the 24 fps clips (phones, about half the GPU memory).
-  seek_wall/<full|lite>/ the 3 wall-tag clips (turn_to_wall, the 10 s squat spray `wall_spray_long`, turn_away_toss): about half of Seek's street memory, so the game
+  seek_wall/<full|lite>/ the graffiti clips built from his kept segments (turn_to_wall, wall_shake, wall_squat_dn/hold/up, wall_spray_mid, turn_away_toss): about half of Seek's street memory, so the game
                      loads it in the background only while a wall is near and unloads it after the tag
   seek_fwd/<full|lite>/  just the 3 forward-spray clips (the fight scene loads this instead of the whole street atlas)
   props/             camera (angle, ledoff, smash, broken) and CYLO drone (hover, hit, destroy) atlas + props.json
   tags/              the approved SEEK tags (seek_throwup_mike, seek_3d_v3), copied unchanged
   wall_panel.png     blank dirty concrete panel the tags are sprayed on (placeholder art, procedural)
 """
-import json, os, hashlib, shutil
+import json, os, hashlib, shutil, sys
 import numpy as np
 from PIL import Image
 import rectpack
@@ -88,40 +88,57 @@ def smooth_tips(tips, k=2):
     return out
 
 
-TIP = {'cam_spray_raise': 'up', 'cam_spray_hold': 'up', 'cam_spray_return': 'up', 'fwd_spray_raise': 'right', 'fwd_spray_hold': 'right',
-       'fwd_spray_return': 'right', 'turn_to_wall': 'right', 'wall_spray_long': 'can'}
+TIP = {'cam_spray_raise': 'up', 'fwd_spray_raise': 'right', 'turn_to_wall': 'right', 'wall_spray_long': 'can'}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from seek_edl import KEEP, PLAY, WALL, FWD   # noqa: E402  (Michael's Premiere edit: only kept frames are packed; playback order lives in clips.json)
 
 
-WALL = ('turn_to_wall', 'wall_spray_long', 'turn_away_toss')
-FWD = ('fwd_spray_raise', 'fwd_spray_hold', 'fwd_spray_return')
+def playback(base, mode):
+    """positions into the kept source frames -> the frame order a clip plays (keys may repeat: reverse / ping-pong cost no textures)"""
+    b = list(base)
+    if mode == 'fwd' or mode == 'hold': return b
+    if mode == 'rev': return b[::-1]
+    if mode == 'pp': return b + b[-2:0:-1]
+    if mode == 'shake': return b + b[-2::-1] + b[1:]
+    raise ValueError(mode)
 
 
-def build_seek(mode, only=None, sub='seek', skip=()):
+def build_seek(mode, names, sub='seek'):
     man = json.load(open(S4 + '/manifest.json'))['clips']
-    if only: man = {k: v for k, v in man.items() if k in only}
-    man = {k: v for k, v in man.items() if k not in skip}
-    imgs, cache, clips = {}, {}, {}
-    for name, c in man.items():
-        files = [f'{S4}/{f}' if not f.startswith('/') else f for f in c['files']]
-        idx = list(range(len(files)))
-        fps = c['fps']
-        if mode == 'lite' and fps >= 20 and len(files) > 20:
-            idx = idx[::2] + ([idx[-1]] if (len(idx) - 1) % 2 else []); fps = fps / 2
-        keys, tips = [], []
-        for i in idx:
-            p = files[i]
-            if p not in cache:
-                t = trim(p); h = hashlib.sha1(t['px'].tobytes() + repr((t['off'], t['px'].shape)).encode()).hexdigest()
-                if h not in imgs: imgs[h] = (f'f{len(imgs):04d}', t)
-                cache[p] = (imgs[h][0], tip_of(t['full'], TIP[name]) if name in TIP else None)
-            keys.append(cache[p][0]); tips.append(cache[p][1])
-        if name in TIP and TIP[name] == 'can': tips = smooth_tips(tips)
-        clips[name] = dict(frames=keys, fps=fps, loop=c['loop'], anchor=c['anchor'], canvas=c['canvas'], tips=tips if name in TIP else None)
+    imgs, cache, clips, smooth = {}, {}, {}, {}
+    def frame(src, i):
+        p = man[src]['files'][i]; p = f'{S4}/{p}' if not p.startswith('/') else p
+        if p not in cache:
+            t = trim(p); h = hashlib.sha1(t['px'].tobytes() + repr((t['off'], t['px'].shape)).encode()).hexdigest()
+            if h not in imgs: imgs[h] = (f'f{len(imgs):04d}', t)
+            cache[p] = (imgs[h][0], t['full'])
+        return cache[p][0]
+    def tip(src, i):
+        if src not in TIP: return None
+        if src == 'wall_spray_long':          # smoothed over the ORIGINAL contiguous frames, then picked
+            if src not in smooth:
+                raws = []
+                for j in range(len(man[src]['files'])):
+                    frame(src, j); p = man[src]['files'][j]; p = f'{S4}/{p}' if not p.startswith('/') else p
+                    raws.append(tip_of(cache[p][1], 'can'))
+                smooth[src] = smooth_tips(raws)
+            return smooth[src][i]
+        frame(src, i); p = man[src]['files'][i]; p = f'{S4}/{p}' if not p.startswith('/') else p
+        return tip_of(cache[p][1], TIP[src])
+    for name in names:
+        sp = PLAY[name]; src = sp['src']; c = man[src]
+        base = list(sp['base']); fps = sp['fps'] or c['fps']
+        if mode == 'lite' and fps >= 20 and len(base) > 20:
+            base = base[::2] + ([base[-1]] if (len(base) - 1) % 2 else []); fps = fps / 2
+        seq = playback(base, sp['mode'])
+        clips[name] = dict(frames=[frame(src, i) for i in seq], fps=fps, loop=sp['loop'], anchor=c['anchor'], canvas=c['canvas'],
+                           tips=[tip(src, i) for i in seq] if src in TIP else None)
     od = f'{OUT}/{sub}/{mode}'
     shutil.rmtree(od, ignore_errors=True)
-    mb = pack({k: t for k, t in imgs.values()}, od, 'mlwall' if sub == 'seek_wall' else 'mlseek')
+    used = {k for cl in clips.values() for k in cl['frames']}
+    mb = pack({k: t for k, t in imgs.values() if k in used}, od, 'mlwall' if sub == 'seek_wall' else 'mlseek')
     json.dump(dict(clips=clips, gpu_mb=mb), open(f'{od}/clips.json', 'w'))
-    print(sub, mode, 'unique frames', len(imgs), 'GPU MB', mb)
+    print(sub, mode, 'unique frames', len(used), 'GPU MB', mb)
 
 
 def build_props():
@@ -169,9 +186,9 @@ if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     if '--wall-only' not in __import__('sys').argv:
         for m in ('full', 'lite'):
-            build_seek(m, skip=WALL)
-            build_seek(m, only=WALL, sub='seek_wall')
-            build_seek(m, only=FWD, sub='seek_fwd')   # the FIGHT scene only needs the forward spray
+            build_seek(m, [n for n in PLAY if n not in WALL])
+            build_seek(m, list(WALL), sub='seek_wall')
+            build_seek(m, list(FWD), sub='seek_fwd')   # the FIGHT scene only needs the forward spray
         build_props()
     os.makedirs(OUT + '/tags', exist_ok=True)
     for t in ('seek_throwup_mike', 'seek_3d_v3'):

@@ -1,0 +1,26 @@
+seg,edit_start_frame,edit_end_frame,edit_video_frames,edit_seconds,move,group,src_start,src_end,unique_src_frames,direction,speed_percent,mean_src_step_per_video_frame,hold_extra_frames,repeats,cut_inside_src_ranges,note
+0,0,16,17,0.7083,idle_a,street,0,16,17,forward,200,1.0,0,1,,"12 fps source, 1 src frame per video frame = 200%"
+1,18,51,34,1.4167,walk_loop,street,0,29,30,forward,100,1.0,4,1,,
+2,53,80,28,1.1667,guard_up,street,9,36,28,forward,100,1.0,0,1,,
+3,82,94,13,0.5417,guard_down,street,17,35,13,forward,150,1.5,0,1,,"alternating src steps 1,2 = ~150%"
+4,96,128,33,1.375,pocket_draw,street,0,32,33,forward,100,1.0,0,1,,
+5,130,133,4,0.1667,pocket_draw,street,43,46,4,forward,100,1.0,0,1,,frames 33-42 cut; 43-46 kept (pocket_draw k == pocket_stow 71-k exactly)
+6,135,140,6,0.25,cam_spray_raise,street,0,20,6,forward,400,4.0,0,1,,every 4th source frame = 400%; last kept frame = spray freeze + KO pose
+7,142,148,7,0.2917,fwd_spray_raise,street,3,27,7,forward,400,4.0,0,1,,every 4th source frame = 400%; last kept frame = spray freeze + KO pose
+8,150,161,12,0.5,fight_idle,fight,0,9,10,forward,100,1.0,2,1,,
+9,163,196,34,1.4167,fight_walk_fwd,fight,0,33,34,forward,100,1.0,0,1,,
+10,198,217,20,0.8333,fight_kick_b,fight,0,15,16,forward,100,1.0,4,1,,
+11,219,238,20,0.8333,fight_kick,fight,0,13,14,forward,100,1.0,6,1,,
+12,240,259,20,0.8333,fight_crouch,fight,12,25,14,forward,100,1.0,6,1,,only the lower half kept (12-25); playing it reversed gives the way down
+13,261,264,4,0.1667,fight_block,fight,0,5,4,forward,167,1.667,0,1,,"frames 0,1,3,5 (src steps 1,2,2): final frame 5 = block/guard hold frame"
+14,266,296,31,1.2917,fight_knockdown,fight,0,30,31,forward,100,1.0,0,1,,whole knockout kept; its FIRST SECTION (0-4) is the new hurt reaction
+15,298,326,29,1.2083,fight_getup,fight,1,29,29,forward,100,1.0,0,1,,frame 0 dropped
+16,327,330,4,0.1667,fight_block,fight,0,5,4,forward,167,1.667,0,1,,"frames 0,1,3,5 (src steps 1,2,2): final frame 5 = block/guard hold frame; second copy (after get-up) is an exact repeat of the first"
+17,332,364,33,1.375,turn_to_wall,street,6,38,33,forward,100,1.0,0,1,,
+18,366,392,27,1.125,wall_spray_long,street,23,49,27,forward,100,1.0,0,1,,
+19,394,417,24,1.0,wall_spray_long,street,102,125,24,forward,100,1.0,0,1,,
+20,419,436,18,0.75,wall_spray_long,street,155,172,18,forward,100,1.0,0,1,,
+21,438,443,6,0.25,wall_spray_long,street,198,203,6,forward,100,1.0,0,1,,
+22,445,488,44,1.8333,turn_away_toss,street,0,43,44,forward,100,1.0,0,1,,
+23,490,538,49,2.0417,turn_away_toss,street,44,92,49,forward,100,1.0,0,1,,
+24,539,554,16,0.6667,turn_away_toss,street,115,130,16,forward,100,1.0,0,1,,jumps 92 -> 115 (cut 93-114)

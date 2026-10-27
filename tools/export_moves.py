@@ -1,4 +1,4 @@
-"""Render ALL of Seek's game moves in a row for editing in Premiere.
+"""Render ALL of Seek's game moves in a row (EDL rebuild: the clips AS THE GAME PLAYS THEM, i.e. kept frames + forward/reverse/ping-pong/shake order).
 
   out: <OUT>/seek_all_moves_24fps.mp4          H.264, constant 24 fps, 1280x720, yuv420p, grey background
        <OUT>/seek_all_moves_24fps_alpha.mov    ProRes 4444 with alpha (transparent background), same frames
@@ -10,7 +10,7 @@
         24 fps -> 1:1, 12 fps -> every frame held x2, 21.176 fps (walk_loop) -> 30 frames over 34 video frames (some held x2)
      fight moves (60 Hz ticks, 2-6 ticks per frame): each source frame is held for round(cumulative ticks*24/60) - previous end video frames, minimum 1,
         so no source frame is ever skipped and the move's total length stays within about half a video frame of the real game time
-  Every clip plays once, start to end (loops/holds are NOT repeated).
+  Every clip plays once, start to end, in its playback order (reverse / ping-pong / shake are already in the frame list; a 1-frame freeze clip shows its single frame; loops are NOT repeated).
 """
 import json, os, subprocess, sys, csv
 import numpy as np
@@ -25,11 +25,9 @@ W, H, AX, AY, FPS = 1280, 720, 640, 660, 24
 BG = (110, 110, 110)
 ORANGE = (0xFF, 0x7A, 0x00)
 
-man = json.load(open(S4 + '/manifest.json'))['clips']
-STREET = ['idle_a', 'idle_b', 'walk_loop', 'guard_up', 'guard_down', 'pocket_draw', 'pocket_stow', 'turn_to_wall', 'wall_spray_long', 'turn_away_toss',
-          'cam_spray_raise', 'cam_spray_hold', 'cam_spray_return', 'fwd_spray_raise', 'fwd_spray_hold', 'fwd_spray_return']
 FIGHT = ['idle', 'walk_fwd', 'walk_back', 'kick_b', 'kick', 'crouch', 'block', 'hit', 'knockdown', 'getup']
-NICE = {'kick_b': 'punch (kick_b)', 'kick': 'kick'}
+NICE = {'kick_b': 'punch (kick_b)', 'kick': 'kick', 'hit': 'hurt (first section of knockdown, then reverse)'}
+STREET_GROUPS = [('seek', 'mock_seek'), ('seek_wall', 'mock_seek_wall')]
 
 def place(px, anchor):
     """px: RGBA canvas array -> full 1280x720 RGBA layer, anchor at (AX,AY)"""
@@ -39,33 +37,45 @@ def place(px, anchor):
     L[y0:y0 + h, x0:x0 + w] = px
     return L
 
-segments = []   # (name, group, source_fps, n_src, layers[list of (RGBA layer)] one per video frame, note)
-for n in STREET:
-    c = man[n]; fps = c['fps']; files = [f'{S4}/{f}' for f in c['files']]
-    imgs = [place(np.array(Image.open(f).convert('RGBA')), c['anchor']) for f in files]
-    nv = int(round(len(files) * FPS / fps))
-    seq = [imgs[min(len(files) - 1, int(np.floor(m * fps / FPS + 1e-9)))] for m in range(nv)]
-    segments.append((n, 'street', fps, len(files), seq, 'loop clip (plays once)' if c['loop'] else ''))
-
-mv = json.load(open(G + '/public/assets/fight/seek/full/moves.json'))['moves']
-at = json.load(open(G + '/public/assets/fight/seek/full/atlas.json'))
-pages, fr = {}, {}
-for t in at['textures']:
-    pg = np.array(Image.open(f"{G}/public/assets/fight/seek/full/{t['image']}").convert('RGBA'))
-    for f in t['frames']: fr[f['filename']] = (pg, f)
-def atlas_canvas(k, canvas):
+def load_atlas(d):
+    at = json.load(open(d + '/atlas.json')); fr = {}
+    for t in at['textures']:
+        pg = np.array(Image.open(f"{d}/{t['image']}").convert('RGBA'))
+        for f in t['frames']: fr[f['filename']] = (pg, f)
+    return fr
+def atlas_canvas(fr, k, canvas):
     pg, f = fr[k]; r = f['frame']; s = f['spriteSourceSize']
     cv = np.zeros((canvas[1], canvas[0], 4), np.uint8)
     cv[s['y']:s['y'] + r['h'], s['x']:s['x'] + r['w']] = pg[r['y']:r['y'] + r['h'], r['x']:r['x'] + r['w']]
     return cv
+
+segments = []   # (name, group, source_fps, n_src, layers, note)
+for g, grp in STREET_GROUPS:
+    d = G + f'/public/assets/mock/{g}/full'
+    clips = json.load(open(d + '/clips.json'))['clips']; fr = load_atlas(d)
+    for n, c in clips.items():
+        keys = c['frames']; fps = c['fps']
+        cache = {}
+        def img(k):
+            if k not in cache: cache[k] = place(atlas_canvas(fr, k, c['canvas']), c['anchor'])
+            return cache[k]
+        nv = max(1, int(round(len(keys) * FPS / fps)))
+        seq = [img(keys[min(len(keys) - 1, int(np.floor(m * fps / FPS + 1e-9)))]) for m in range(nv)]
+        note = ('loop clip (plays once here); ' if c['loop'] else '') + f'{len(set(keys))} unique atlas frames in a {len(keys)}-frame playback list'
+        if len(keys) == 1: note = 'single frame: the game freezes on this pose while spraying / as the K.O. pose'
+        segments.append((n, grp, fps, len(set(keys)), seq, note))
+
+fd = G + '/public/assets/fight/seek/full'
+mv = json.load(open(fd + '/moves.json'))['moves']; fra = load_atlas(fd)
 for n in FIGHT:
     m = mv[n]; frames = m['frames']; ticks = [f['t'] for f in frames]; tot = sum(ticks)
-    imgs = [place(atlas_canvas(f['k'], m['canvas']), m['anchor']) for f in frames]
+    imgs = [place(atlas_canvas(fra, f['k'], m['canvas']), m['anchor']) for f in frames]
     seq, prev, cum = [], 0, 0
     for im, t in zip(imgs, ticks):
-        cum += t; end = max(prev + 1, int(round(cum * FPS / 60.0 + 1e-9)))   # frame ends at its ideal 24 fps time, but is NEVER dropped (min 1 video frame)
+        cum += t; end = max(prev + 1, int(round(cum * FPS / 60.0 + 1e-9)))
         seq += [im] * (end - prev); prev = end
-    segments.append(('fight_' + n, 'fight', round(len(frames) * 60 / tot, 3), len(frames), seq, f'60Hz ticks/frame {min(ticks)}-{max(ticks)}; real game time {tot/60:.3f}s, video {len(seq)/FPS:.3f}s' + (f'; in-game hold at frame {m["hold"]} skipped' if m.get('hold') is not None else '')))
+    uniq = len(set(f['k'] for f in frames))
+    segments.append(('fight_' + n, 'fight', round(len(frames) * 60 / tot, 3), uniq, seq, f'{uniq} unique atlas frames in a {len(frames)}-step list; 60Hz ticks/frame {min(ticks)}-{max(ticks)}; real game time {tot/60:.3f}s, video {len(seq)/FPS:.3f}s' + (f'; in-game hold at list index {m["hold"]} skipped' if m.get('hold') is not None else '') + ('; ' + NICE[n] if n in NICE else '')))
 
 total = sum(len(s[4]) for s in segments) + len(segments) - 1
 print('moves', len(segments), 'video frames', total, 'duration s', total / FPS)

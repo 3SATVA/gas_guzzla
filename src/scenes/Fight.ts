@@ -31,7 +31,7 @@ export class FightScene extends Phaser.Scene {
   private cans = new CanStock();
   private clips: Record<string, any> = {};
   private heroS: Phaser.GameObjects.Sprite | null = null;
-  private sp: { steps: SprayStep[]; i: number; cf: number; t: number; hit: boolean } | null = null;
+  private sp: { steps: SprayStep[]; i: number; cf: number; t: number; hit: boolean; vic?: boolean } | null = null;
   private stun = { t: 0, cool: 0 }; private outT = 0; private cpuOff = false;
   private splats: Splat[] = []; private lastBox: Box = [-60, -300, 60, -20];
   private mist!: MistSys; private canG!: Phaser.GameObjects.Graphics; private canTxt!: Phaser.GameObjects.Text; private outTxt!: Phaser.GameObjects.Text;
@@ -457,7 +457,7 @@ export class FightScene extends Phaser.Scene {
     P.step(this.sp ? NO_INPUT : pin, C);
     // stunned: the CYLOBOT is stuck on its current animation frame (no movement, no AI, no attacks), then resumes from there
     if (stunned) this.stun.t--; else C.step(cin, P);
-    this.tickSpray();
+    this.tickVictory(); this.tickSpray();
     if (P.state === 'attack' && P.fi === 0) { this.buf.punch = 0; this.buf.kick = 0; }
     if (this.phase === 'fight' || this.phase === 'ko') {
       const hp = this.phase === 'fight' ? this.probe(P, C) : null, hc = this.phase === 'fight' && !stunned ? this.probe(C, P) : null;
@@ -502,8 +502,16 @@ export class FightScene extends Phaser.Scene {
     if (this.pid !== 'seek' || this.sp) return;
     if (this.cans.total() <= 0.001) { this.outT = 80; return; }
     this.P.toIdle(0);
-    this.sp = { steps: [{ clip: 'fwd_spray_raise', speed: 1.5 }, { clip: 'fwd_spray_hold', speed: 1, ticks: SPRAY_HOLD }, { clip: 'fwd_spray_return', speed: 1.5 }], i: 0, cf: 0, t: 0, hit: false };
+    this.sp = { steps: [{ clip: 'fwd_spray_raise', speed: 1 }, { clip: 'fwd_spray_hold', speed: 1, ticks: SPRAY_HOLD }, { clip: 'fwd_spray_return', speed: 1 }], i: 0, cf: 0, t: 0, hit: false };
     this.sprayStats.sprays++;
+  }
+  /** the winner (Seek) holds the final spray frame as her K.O. / victory pose */
+  private tickVictory() {
+    const P = this.P;
+    if (this.pid !== 'seek' || this.phase !== 'ko' || this.winner !== P || this.sp?.vic) return;
+    const hold = { clip: 'fwd_spray_hold', speed: 1, ticks: 1e9 };
+    if (this.sp) this.sp = { steps: [hold], i: 0, cf: 0, t: 0, hit: true, vic: true };
+    else if (P.state === 'idle' || P.state === 'walk') { P.toIdle(0); this.sp = { steps: [{ clip: 'fwd_spray_raise', speed: 1 }, hold], i: 0, cf: 0, t: 0, hit: true, vic: true }; }
   }
   private endSpray() { this.sp = null; if (this.heroS) this.heroS.setVisible(false); this.P?.sprite.setVisible(true); }
 
@@ -518,13 +526,13 @@ export class FightScene extends Phaser.Scene {
   private tickSpray() {
     const sp = this.sp, P = this.P;
     if (!sp) return;
-    if (this.phase !== 'fight' || P.state === 'hit' || P.lying()) { this.endSpray(); return; }
+    if (!sp.vic && (this.phase !== 'fight' || P.state === 'hit' || P.lying())) { this.endSpray(); return; }
     const st = sp.steps[sp.i], c = this.clips[st.clip], n = c.frames.length;
     let fin = false;
     sp.cf += (c.fps * st.speed) / 60;
     if (st.ticks === undefined) { if (sp.cf >= n - 1) { sp.cf = n - 1; fin = true; } }
     else { if (sp.cf >= n) sp.cf -= n; fin = sp.t + 1 >= st.ticks; }
-    if (st.ticks !== undefined) {
+    if (st.ticks !== undefined && !sp.vic) {
       const tp = this.sprayTip();
       if (tp) {
         const ang = P.facing > 0 ? 0 : Math.PI;
