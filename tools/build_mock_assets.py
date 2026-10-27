@@ -1,8 +1,9 @@
 """Pack the Seek mock-level art into public/assets/mock/ (pixel exact, no resampling).
 
-  seek/<full|lite>/  atlas of the 16 clips in brawler/v1/seek_sprites_v4 (trimmed, deduped, 2048 pages) + clips.json
+  seek/<full|lite>/  atlas of the 16 clips in brawler/v1/seek_sprites_v4 (trimmed, deduped, 2048 pages; includes the 10 s squat graffiti spray `wall_spray_long`) + clips.json
                      (frames, fps, loop, anchor, and the can-nozzle 'tip' per frame for the spray clips).
                      lite = every 2nd frame of the 24 fps clips (phones, about half the GPU memory).
+  seek_fwd/<full|lite>/  just the 3 forward-spray clips (the fight scene loads this instead of the whole street atlas)
   props/             camera (angle, ledoff, smash, broken) and CYLO drone (hover, hit, destroy) atlas + props.json
   tags/              the approved SEEK tags (seek_throwup_mike, seek_3d_v3), copied unchanged
   wall_panel.png     blank dirty concrete panel the tags are sprayed on (placeholder art, procedural)
@@ -61,15 +62,37 @@ def tip_of(a, mode):
         xm = xs.max(); sel = xs >= xm - 3; return [int(xm), int(ys[sel].mean())]
     if mode == 'up':      # can held up: top-most pixels
         ym = ys.min(); sel = ys <= ym + 3; return [int(xs[sel].mean()), int(ym)]
+    if mode == 'can':     # long squat spray (back view, can in her right hand = screen right): warm skin/can pixels; the can is the highest point when the arm is overhead, else the furthest right
+        rgb = a[..., :3].astype(int)
+        hair = al & (rgb[..., 1] > rgb[..., 0] + 25)         # the teal braids
+        hy = np.nonzero(hair)[0].min() if hair.any() else ys.min()
+        lo = ys > ys.min() + 0.55 * (ys.max() - ys.min())
+        cxb = float(xs[lo].mean()) if lo.any() else float(xs.mean())     # body centre from the legs
+        over = ys < hy - 6
+        if over.any() and (xs[over] > cxb - 25).any():       # arm overhead: the can is the highest thing
+            k = over & (xs > cxb - 25); ym = ys[k].min(); sel = k & (ys <= ym + 4)
+            return [int(xs[sel].mean()), int(ym)]
+        xm = xs.max(); sel = xs >= xm - 4                     # otherwise the hand/can is the furthest right pixel of her
+        return [int(xs[sel].mean()), int(ys[sel].mean())]
     return None
 
 
+def smooth_tips(tips, k=2):
+    """5-frame median over the per-frame detections, so a stray pixel cluster can't throw the nozzle across the body"""
+    out = []
+    for i in range(len(tips)):
+        w = [t for t in tips[max(0, i - k): i + k + 1] if t]
+        out.append([int(np.median([t[0] for t in w])), int(np.median([t[1] for t in w]))] if w else None)
+    return out
+
+
 TIP = {'cam_spray_raise': 'up', 'cam_spray_hold': 'up', 'cam_spray_return': 'up', 'fwd_spray_raise': 'right', 'fwd_spray_hold': 'right',
-       'fwd_spray_return': 'right', 'turn_to_wall': 'right'}
+       'fwd_spray_return': 'right', 'turn_to_wall': 'right', 'wall_spray_long': 'can'}
 
 
-def build_seek(mode):
+def build_seek(mode, only=None, sub='seek'):
     man = json.load(open(S4 + '/manifest.json'))['clips']
+    if only: man = {k: v for k, v in man.items() if k in only}
     imgs, cache, clips = {}, {}, {}
     for name, c in man.items():
         files = [f'{S4}/{f}' if not f.startswith('/') else f for f in c['files']]
@@ -85,12 +108,13 @@ def build_seek(mode):
                 if h not in imgs: imgs[h] = (f'f{len(imgs):04d}', t)
                 cache[p] = (imgs[h][0], tip_of(t['full'], TIP[name]) if name in TIP else None)
             keys.append(cache[p][0]); tips.append(cache[p][1])
+        if name in TIP and TIP[name] == 'can': tips = smooth_tips(tips)
         clips[name] = dict(frames=keys, fps=fps, loop=c['loop'], anchor=c['anchor'], canvas=c['canvas'], tips=tips if name in TIP else None)
-    od = f'{OUT}/seek/{mode}'
+    od = f'{OUT}/{sub}/{mode}'
     shutil.rmtree(od, ignore_errors=True)
     mb = pack({k: t for k, t in imgs.values()}, od, 'mlseek')
     json.dump(dict(clips=clips, gpu_mb=mb), open(f'{od}/clips.json', 'w'))
-    print('seek', mode, 'unique frames', len(imgs), 'GPU MB', mb)
+    print(sub, mode, 'unique frames', len(imgs), 'GPU MB', mb)
 
 
 def build_props():
@@ -137,7 +161,9 @@ def wall_panel():
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     if '--wall-only' not in __import__('sys').argv:
-        for m in ('full', 'lite'): build_seek(m)
+        for m in ('full', 'lite'):
+            build_seek(m)
+            build_seek(m, only=('fwd_spray_raise', 'fwd_spray_hold', 'fwd_spray_return'), sub='seek_fwd')   # the CYLOBOT fight only needs the forward spray
         build_props()
     os.makedirs(OUT + '/tags', exist_ok=True)
     for t in ('seek_throwup_mike', 'seek_3d_v3'):

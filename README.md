@@ -52,7 +52,9 @@ URL flags: `?scene=fight&fighter=fade|seek` jumps straight in, `?lite=1` / `?ful
 
 ### STREET mock level (main menu → STREET, or `?scene=mock`)
 
-A side-scrolling street level starring Seek (MOCK / prototype). She starts with 5 spray cans (each a different colour). Graffiti costs 1 can, a camera 0.5, a drone spray 0.5. Walk far enough and the CYLOBOT 1v1 fight starts (hands off to the FIGHT mode; its PICK button then reads STREET ↩ and returns here).
+A side-scrolling street level starring Seek (MOCK / prototype). She starts with 5 spray cans (each a different colour). Graffiti costs 1 can, a camera 0.5, a drone spray 0.5. SPRAY near a wall walks her to the CENTRE of the wall, then she turns and does the full 10 s squat spray (`wall_spray_long`, spray_v2 take C) while the tag builds outward from her equally to the left and right (the can hand favours the band it is at: high strokes top, the squat bottom). Walk far enough and the CYLOBOT 1v1 fight starts (hands off to the FIGHT mode with the remaining cans; its PICK button then reads STREET ↩ and returns here with the cans).
+
+Spraying the CYLOBOT (street boss fight and FIGHT mode, Seek only): SPACE / SPRAY plays the forward spray, 0.5 can each (OUT OF CANS when empty). A spray that reaches him leaves a persistent paint splat (several decals, anchored to his body so they follow his animation) and FREEZES him on his current frame for 1 s (no flinch, no movement, no AI); at most one stun per 2.5 s, so it can't be stunlocked. Splats accumulate until the match is reset.
 
 | | Keyboard | Touch |
 |---|---|---|
@@ -63,7 +65,7 @@ A side-scrolling street level starring Seek (MOCK / prototype). She starts with 
 | ACTION: draw / stow the can | E | CAN |
 | Menu | Esc | MENU ↩ |
 
-Guard: relaxed by default; the first punch/kick raises the guard, about 6 s without fighting lowers it. Assets are built by `python3 tools/build_mock_assets.py` from `brawler/v1/seek_sprites_v4` plus the camera/drone sheets. Scripted play-through with video: `node tools/mock_check.mjs` (dev server on `$BASE`).
+Guard: relaxed by default; the first punch/kick raises the guard, about 6 s without fighting lowers it. Assets are built by `python3 tools/build_mock_assets.py` from `brawler/v1/seek_sprites_v4` plus the camera/drone sheets. Scripted play-through with video (includes spraying the CYLOBOT): `node tools/mock_check.mjs`; short two-tag capture: `node tools/mock_tags_check.mjs` (dev server on `$BASE`, restart vite after re-running the asset build). The fight scene loads only the 3 forward-spray clips (`public/assets/mock/seek_fwd`).
 
 ## How it is put together
 

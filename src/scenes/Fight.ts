@@ -3,6 +3,7 @@ import { Fighter, FY, STAGE_L, STAGE_R } from '../fight/Fighter';
 import { StageFx } from '../fight/StageFx';
 import { Box, FighterId, Inp, MoveSet, NO_INPUT } from '../fight/types';
 import { isTouch, liteMode } from '../game/lite';
+import { CanStock, MistSys, SPLAT_VARIANTS, drawCan, CAN_COLORS, splatTex } from '../game/spray';
 
 const STAGE_W = 1920;
 const TICK = 1000 / 60;
@@ -11,13 +12,30 @@ const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const overlap = (a: Box, b: Box) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
 
 type Phase = 'intro' | 'fight' | 'ko' | 'over';
-interface TBtn { id: keyof Inp; x: number; y: number; r: number; g: Phaser.GameObjects.Arc; t: Phaser.GameObjects.Text }
+interface TBtn { id: string; x: number; y: number; r: number; g: Phaser.GameObjects.Arc; t: Phaser.GameObjects.Text }
+
+const STUN_TICKS = 60;          // a spray hit freezes the CYLOBOT on its current frame for 1 s
+const STUN_COOL = 150;          // at least 2.5 s between stuns (spray can't stunlock)
+const SPRAY_HOLD = 74;          // ticks of the held spray (same as the street drone spray)
+const SPRAY_CAN = 0.5;          // half a can per spray, like the drones
+interface SprayStep { clip: string; speed: number; ticks?: number }
+interface Splat { u: number; v: number; sc: number; flip: number; spr: Phaser.GameObjects.Image; age: number }
 
 /** 1v1 vs the CPU CYLOBOT on the v6 alley: best of 3, MK-style HUD, keyboard + touch. */
 export class FightScene extends Phaser.Scene {
   private pid: FighterId = 'fade';
   private from = '';
   private lite = false;
+  // spray (Seek only): cans carried from the street, forward-spray clips, CYLOBOT stun + accumulating paint splats
+  private canInit: number[] | undefined;
+  private cans = new CanStock();
+  private clips: Record<string, any> = {};
+  private heroS: Phaser.GameObjects.Sprite | null = null;
+  private sp: { steps: SprayStep[]; i: number; cf: number; t: number; hit: boolean } | null = null;
+  private stun = { t: 0, cool: 0 }; private outT = 0; private cpuOff = false;
+  private splats: Splat[] = []; private lastBox: Box = [-60, -300, 60, -20];
+  private mist!: MistSys; private canG!: Phaser.GameObjects.Graphics; private canTxt!: Phaser.GameObjects.Text; private outTxt!: Phaser.GameObjects.Text;
+  private sprayStats = { sprays: 0, hits: 0, stuns: 0 };
   private P!: Fighter; private C!: Fighter;
   private fx!: StageFx;
   private phase: Phase = 'intro'; private phaseT = 0;
@@ -32,7 +50,7 @@ export class FightScene extends Phaser.Scene {
   private pickBtn!: Phaser.GameObjects.Text; private hint!: Phaser.GameObjects.Text;
   // input
   private keys: Record<string, Phaser.Input.Keyboard.Key> = {};
-  private buf = { punch: 0, kick: 0 };
+  private buf = { punch: 0, kick: 0, spray: 0 };
   private touch: TBtn[] = []; private touchPrev: Record<string, boolean> = {};
   private useTouch = false;
   // cpu
@@ -43,6 +61,7 @@ export class FightScene extends Phaser.Scene {
   init(data: any) {
     this.pid = data?.fighter === 'seek' ? 'seek' : 'fade';
     this.from = data?.from === 'mock' ? 'mock' : '';
+    this.canInit = Array.isArray(data?.cans) ? data.cans : undefined;
     this.registry.set('fighter', this.pid);
   }
 
@@ -58,6 +77,11 @@ export class FightScene extends Phaser.Scene {
     for (const id of [this.pid, 'cylo'] as FighterId[]) {
       if (!this.textures.exists(`ft_${id}`)) this.load.multiatlas(`ft_${id}`, `${F}${id}/${mode}/atlas.json`, `${F}${id}/${mode}/`);
       if (!this.cache.json.exists(`mv_${id}`)) this.load.json(`mv_${id}`, `${F}${id}/${mode}/moves.json`);
+    }
+    if (this.pid === 'seek') {
+      const M = `assets/mock/seek_fwd/${mode}/`;
+      if (!this.textures.exists('mf_seek')) this.load.multiatlas('mf_seek', `${M}atlas.json`, M);
+      if (!this.cache.json.exists('mf_clips')) this.load.json('mf_clips', `${M}clips.json`);
     }
     const S = F + 'stage/';
     if (!this.textures.exists('alley_v6')) this.load.image('alley_v6', S + 'alley_v6.png');
@@ -95,7 +119,9 @@ export class FightScene extends Phaser.Scene {
     const W = this.scale.width;
     const q = new URLSearchParams(location.search);
     this.phase = 'intro'; this.phaseT = 0; this.round = 1; this.hitstop = 0; this.acc = 0; this.winner = null; this.overUi = [];
-    this.buf = { punch: 0, kick: 0 }; this.touch = []; this.touchPrev = {};
+    this.buf = { punch: 0, kick: 0, spray: 0 }; this.touch = []; this.touchPrev = {};
+    this.sp = null; this.stun = { t: 0, cool: 0 }; this.outT = 0; this.splats = []; this.sprayStats = { sprays: 0, hits: 0, stuns: 0 };
+    this.cans = new CanStock(this.canInit);
     const cam = this.cameras.main;
     cam.setZoom(1).setBounds(0, 0, STAGE_W, 720).setBackgroundColor('#000').fadeIn(250, 0, 0, 0);
     this.add.image(0, 0, 'alley_v6').setOrigin(0).setDepth(0);
@@ -106,12 +132,19 @@ export class FightScene extends Phaser.Scene {
     this.fx = new StageFx(this, this.lite, this.bagIds(), this.streakCount(), q.get('bag') === 'front');
     this.P = new Fighter(this, this.pid, this.cache.json.get(`mv_${this.pid}`) as MoveSet, 11);
     this.C = new Fighter(this, 'cylo', this.cache.json.get('mv_cylo') as MoveSet, 10);
+    if (this.pid === 'seek') {
+      this.clips = (this.cache.json.get('mf_clips') as any).clips;
+      this.heroS = this.add.sprite(0, FY, 'mf_seek', this.clips.fwd_spray_raise.frames[0]).setDepth(11).setVisible(false);
+      this.mist = new MistSys(this.add.graphics().setDepth(15));
+    }
     this.computeReach();
     this.buildHud();
     this.buildInput();
     this.startRound();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       for (const id of [this.pid, 'cylo']) { if (this.textures.exists(`ft_${id}`)) this.textures.remove(`ft_${id}`); this.cache.json.remove(`mv_${id}`); }
+      if (this.pid === 'seek' && this.textures.exists('mf_seek')) this.textures.remove('mf_seek');
+      for (const k of this.textures.getTextureKeys()) if (k.startsWith('splat_')) this.textures.remove(k);
     });
     (window as any).__gg.fight = this;
   }
@@ -139,7 +172,13 @@ export class FightScene extends Phaser.Scene {
     this.pickBtn = ui(this.add.text(W - 14, 108, this.from === 'mock' ? 'STREET \u21a9' : 'PICK \u21a9', { fontFamily: 'monospace', fontSize: '18px', color: '#f2c27a', stroke: '#000', strokeThickness: 4 }).setOrigin(1, 0));
     this.pickBtn.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.backToPick());
     const pn = this.pid === 'seek' ? 'KICK' : 'PUNCH', kn = this.pid === 'seek' ? 'HIGH KICK' : 'KICK';
-    this.hint = ui(this.add.text(W / 2, 712, `\u2190\u2192/A D move   \u2193/S crouch   J/Z ${pn}   K/X ${kn}   L/C/SHIFT block   ESC pick`,
+    if (this.pid === 'seek') {
+      this.canG = ui(this.add.graphics());
+      this.canTxt = ui(this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '16px', fontStyle: 'bold', color: '#fff', stroke: '#000', strokeThickness: 4 }));
+      this.outTxt = ui(this.add.text(W / 2, 560, 'OUT OF CANS', { fontFamily: 'monospace', fontSize: '44px', fontStyle: 'bold', color: '#ff5050', stroke: '#000', strokeThickness: 8 }).setOrigin(0.5).setVisible(false).setDepth(72));
+    }
+    const sprayHint = this.pid === 'seek' ? '   SPACE SPRAY (stuns CYLOBOT)' : '';
+    this.hint = ui(this.add.text(W / 2, 712, `\u2190\u2192/A D move   \u2193/S crouch   J/Z ${pn}   K/X ${kn}${sprayHint}   L/C/SHIFT block   ESC pick`,
       { fontFamily: 'monospace', fontSize: '13px', color: '#ddd', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5, 1));
   }
 
@@ -169,16 +208,18 @@ export class FightScene extends Phaser.Scene {
     this.nameP.setPosition(p0, 62 + 18).setOrigin(0, 0);
     this.nameC.setPosition(rx + bw, 62 + 18);
     this.timerTxt.setPosition(W / 2, 43).setText(String(Math.max(0, Math.ceil(ROUND_S - this.timeT / 60))).padStart(2, '0'));
-    this.big.setX(W / 2); this.sub.setX(W / 2); this.hint.setX(W / 2); this.pickBtn.setX(W - 14);
+    this.drawCans();
+    this.big.setX(W / 2); this.sub.setX(W / 2); this.outTxt?.setX(W / 2); this.hint.setX(W / 2); this.pickBtn.setX(W - 14);
   }
 
   // ------------------------------------------------------------------ input
   private buildInput() {
     const kb = this.input.keyboard!;
-    for (const k of ['LEFT', 'RIGHT', 'DOWN', 'A', 'D', 'S', 'J', 'K', 'L', 'Z', 'X', 'C', 'SHIFT', 'R', 'ESC', 'ENTER'])
+    for (const k of ['LEFT', 'RIGHT', 'DOWN', 'A', 'D', 'S', 'J', 'K', 'L', 'Z', 'X', 'C', 'SHIFT', 'R', 'ESC', 'ENTER', 'SPACE'])
       this.keys[k] = kb.addKey(Phaser.Input.Keyboard.KeyCodes[k as keyof typeof Phaser.Input.Keyboard.KeyCodes], true);
     kb.on('keydown-J', () => (this.buf.punch = 8)); kb.on('keydown-Z', () => (this.buf.punch = 8));
     kb.on('keydown-K', () => (this.buf.kick = 8)); kb.on('keydown-X', () => (this.buf.kick = 8));
+    kb.on('keydown-SPACE', () => { if (this.pid === 'seek') this.buf.spray = 10; });
     kb.on('keydown-ESC', () => this.backToPick());
     kb.on('keydown-R', () => { if (this.phase === 'over') this.rematch(); });
     kb.on('keydown-ENTER', () => { if (this.phase === 'over') this.rematch(); });
@@ -186,7 +227,7 @@ export class FightScene extends Phaser.Scene {
     if (!this.useTouch) return;
     this.input.addPointer(3);
     const W = this.scale.width, seek = this.pid === 'seek';
-    const mk = (id: keyof Inp, x: number, y: number, r: number, label: string) => {
+    const mk = (id: string, x: number, y: number, r: number, label: string) => {
       const g = this.add.circle(x, y, r, 0x000000, 0.35).setStrokeStyle(3, 0xf2c27a, 0.8).setScrollFactor(0).setDepth(65);
       const t = this.add.text(x, y, label, { fontFamily: 'monospace', fontSize: label.length > 2 ? '15px' : '26px', fontStyle: 'bold', color: '#f2c27a' })
         .setOrigin(0.5).setScrollFactor(0).setDepth(66);
@@ -194,6 +235,7 @@ export class FightScene extends Phaser.Scene {
     };
     mk('back', 86, 590, 50, '\u25c0'); mk('fwd', 236, 590, 50, '\u25b6'); mk('down', 161, 668, 44, '\u25bc');
     mk('punch', W - 250, 600, 52, seek ? 'KICK' : 'PUNCH'); mk('kick', W - 100, 560, 52, seek ? 'HIGH' : 'KICK'); mk('block', W - 170, 672, 44, 'BLOCK');
+    if (seek) mk('spray', W - 360, 650, 44, 'SPRAY');
   }
 
   /** touch state: 'back'/'fwd' are screen left/right here; converted to facing below */
@@ -201,7 +243,7 @@ export class FightScene extends Phaser.Scene {
     const s: Record<string, boolean> = {};
     if (!this.useTouch) return s;
     const W = this.scale.width;
-    for (const b of this.touch) { if (b.id === 'punch') b.x = W - 250; if (b.id === 'kick') b.x = W - 100; if (b.id === 'block') b.x = W - 170; b.g.setX(b.x); b.t.setX(b.x); }
+    for (const b of this.touch) { if (b.id === 'punch') b.x = W - 250; if (b.id === 'kick') b.x = W - 100; if (b.id === 'block') b.x = W - 170; if (b.id === 'spray') b.x = W - 360; b.g.setX(b.x); b.t.setX(b.x); }
     for (const p of this.input.manager.pointers) {
       if (!p || !p.isDown) continue;
       for (const b of this.touch) if (Math.hypot(p.x - b.x, p.y - b.y) < b.r + 14) s[b.id] = true;
@@ -209,6 +251,7 @@ export class FightScene extends Phaser.Scene {
     for (const b of this.touch) b.g.setFillStyle(s[b.id] ? 0xf2c27a : 0x000000, s[b.id] ? 0.5 : 0.35);
     if (s.punch && !this.touchPrev.punch) this.buf.punch = 8;
     if (s.kick && !this.touchPrev.kick) this.buf.kick = 8;
+    if (s.spray && !this.touchPrev.spray) this.buf.spray = 10;
     this.touchPrev = s;
     return s;
   }
@@ -229,6 +272,7 @@ export class FightScene extends Phaser.Scene {
   // ------------------------------------------------------------------ rounds
   private startRound() {
     this.P.reset(730, 1); this.C.reset(1190, -1);
+    this.endSpray(); this.stun = { t: 0, cool: 0 };
     this.timeT = 0; this.hitstop = 0; this.phase = 'intro'; this.phaseT = 0; this.winner = null;
     this.fx.frontEnabled = true;
     this.ai = { wait: 30, cool: 40, retreat: 0, evade: 0, evadeDelay: 0, intent: 0, pPrev: 'idle' };
@@ -261,14 +305,14 @@ export class FightScene extends Phaser.Scene {
 
   private rematch() {
     for (const o of this.overUi) o.destroy();
-    this.overUi = []; this.P.rounds = 0; this.C.rounds = 0; this.round = 1;
+    this.overUi = []; this.P.rounds = 0; this.C.rounds = 0; this.round = 1; this.clearSplats();
     this.startRound();
   }
 
   private backToPick() {
     if ((this as any)._leaving) return; (this as any)._leaving = true;
     this.cameras.main.fadeOut(200, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => { (this as any)._leaving = false; this.scene.start(this.from === 'mock' ? 'Mock' : 'Select', this.from === 'mock' ? undefined : { mode: 'fight' }); });
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => { (this as any)._leaving = false; this.scene.start(this.from === 'mock' ? 'Mock' : 'Select', this.from === 'mock' ? { cans: this.cans.cans.slice() } : { mode: 'fight' }); });
   }
 
   // ------------------------------------------------------------------ CPU
@@ -312,6 +356,7 @@ export class FightScene extends Phaser.Scene {
 
   private applyHit(A: Fighter, D: Fighter, at: Box | null, forceDmg?: number) {
     A.winHit = true;
+    if (D === this.C) this.stun.t = 0;
     const away = Math.sign(D.bodyX() - A.bodyX()) || -D.facing;
     const facingA = Math.sign(A.bodyX() - D.bodyX()) === D.facing;
     if (forceDmg === undefined && D.guarding() && facingA) {
@@ -392,6 +437,10 @@ export class FightScene extends Phaser.Scene {
     this.phaseT++;
     if (this.buf.punch > 0) this.buf.punch--;
     if (this.buf.kick > 0) this.buf.kick--;
+    if (this.buf.spray > 0) this.buf.spray--;
+    if (this.stun.cool > 0) this.stun.cool--;
+    if (this.outT > 0) this.outT--;
+    this.mist?.tick();
     // fighter lag bars
     for (const f of [P, C]) { if (f.lagDelay > 0) f.lagDelay--; else if (f.lag > f.hp) f.lag = Math.max(f.hp, f.lag - 0.6); if (f.lag < f.hp) f.lag = f.hp; }
     if (this.phase === 'intro') {
@@ -401,11 +450,17 @@ export class FightScene extends Phaser.Scene {
     if (this.hitstop > 0) { this.hitstop--; return; }
     const ts = this.touchState();
     const pin = this.phase === 'fight' ? this.playerInput(ts) : NO_INPUT;
-    const cin = this.cpuInput();
-    P.step(pin, C); C.step(cin, P);
+    const stunned = this.stun.t > 0 && !C.lying() && C.state !== 'hit';
+    if (!stunned) this.stun.t = 0;
+    const cin = stunned || this.cpuOff ? NO_INPUT : this.cpuInput();
+    if (this.buf.spray > 0 && this.phase === 'fight' && !this.sp && (P.state === 'idle' || P.state === 'walk')) { this.buf.spray = 0; this.startSpray(); }
+    P.step(this.sp ? NO_INPUT : pin, C);
+    // stunned: the CYLOBOT is stuck on its current animation frame (no movement, no AI, no attacks), then resumes from there
+    if (stunned) this.stun.t--; else C.step(cin, P);
+    this.tickSpray();
     if (P.state === 'attack' && P.fi === 0) { this.buf.punch = 0; this.buf.kick = 0; }
     if (this.phase === 'fight' || this.phase === 'ko') {
-      const hp = this.phase === 'fight' ? this.probe(P, C) : null, hc = this.phase === 'fight' ? this.probe(C, P) : null;
+      const hp = this.phase === 'fight' ? this.probe(P, C) : null, hc = this.phase === 'fight' && !stunned ? this.probe(C, P) : null;
       if (hp) this.applyHit(P, C, hp);
       if (hc && this.phase === 'fight') this.applyHit(C, P, hc);
       else if (hc) { this.applyHit(C, P, hc); }
@@ -438,14 +493,126 @@ export class FightScene extends Phaser.Scene {
     cam.scrollX = Math.round(cam.scrollX);
     this.fx.update(dms / 1000, cam.scrollX);
     this.P.render(false); this.C.render(false);
+    this.renderSpray();
     this.drawHud();
+  }
+
+  // ------------------------------------------------------------------ spray (Seek)
+  private startSpray() {
+    if (this.pid !== 'seek' || this.sp) return;
+    if (this.cans.total() <= 0.001) { this.outT = 80; return; }
+    this.P.toIdle(0);
+    this.sp = { steps: [{ clip: 'fwd_spray_raise', speed: 1.5 }, { clip: 'fwd_spray_hold', speed: 1, ticks: SPRAY_HOLD }, { clip: 'fwd_spray_return', speed: 1.5 }], i: 0, cf: 0, t: 0, hit: false };
+    this.sprayStats.sprays++;
+  }
+  private endSpray() { this.sp = null; if (this.heroS) this.heroS.setVisible(false); this.P?.sprite.setVisible(true); }
+
+  /** the can nozzle of the spray frame in world space */
+  private sprayTip(): [number, number] | null {
+    const sp = this.sp; if (!sp) return null;
+    const c = this.clips[sp.steps[sp.i].clip], fi = Phaser.Math.Clamp(Math.floor(sp.cf), 0, c.frames.length - 1);
+    const t = c.tips?.[fi]; if (!t) return null;
+    return [this.P.x + this.P.facing * (t[0] - c.anchor[0]), FY + t[1] - c.anchor[1]];
+  }
+
+  private tickSpray() {
+    const sp = this.sp, P = this.P;
+    if (!sp) return;
+    if (this.phase !== 'fight' || P.state === 'hit' || P.lying()) { this.endSpray(); return; }
+    const st = sp.steps[sp.i], c = this.clips[st.clip], n = c.frames.length;
+    let fin = false;
+    sp.cf += (c.fps * st.speed) / 60;
+    if (st.ticks === undefined) { if (sp.cf >= n - 1) { sp.cf = n - 1; fin = true; } }
+    else { if (sp.cf >= n) sp.cf -= n; fin = sp.t + 1 >= st.ticks; }
+    if (st.ticks !== undefined) {
+      const tp = this.sprayTip();
+      if (tp) {
+        const ang = P.facing > 0 ? 0 : Math.PI;
+        if (sp.t < st.ticks - 6) this.mist.cone(tp[0], tp[1], ang, 0.2, 4, 15, 520, this.cans.color());
+        this.cans.consume(SPRAY_CAN / st.ticks);
+        if (!sp.hit && sp.t >= 14 && this.sprayReaches(tp)) { sp.hit = true; this.sprayHit(tp); }
+      }
+    }
+    sp.t++;
+    if (fin) { sp.i++; sp.t = 0; sp.cf = 0; if (sp.i >= sp.steps.length) this.endSpray(); }
+  }
+
+  /** is the CYLOBOT body inside the spray cone ahead of the nozzle */
+  private sprayReaches(tp: [number, number]): boolean {
+    const C = this.C; if (C.lying() || C.state === 'ko') return false;
+    const wb = this.bodyBox(C), f = this.P.facing;
+    const ahead = f > 0 ? wb[2] > tp[0] && wb[0] < tp[0] + 560 : wb[0] < tp[0] && wb[2] > tp[0] - 560;
+    return ahead && wb[1] < tp[1] + 70 && wb[3] > tp[1] - 70;
+  }
+
+  /** the body area of a fighter in world space: hurtbox of the current frame (stays glued to the animation), else the idle box / lying box */
+  private bodyBox(f: Fighter): Box {
+    const fr = f.frame();
+    if (fr.hu) { const b = f.world(fr.hu); this.lastBox = b; return b; }
+    if (f.lying()) { const cx = f.x + f.facing * fr.bcx; return [cx - 190, FY - 230, cx + 190, FY - 10]; }
+    const idle = f.mv.idle.frames[0].hu ?? [-120, -560, 120, 0];
+    return f.world(idle);
+  }
+
+  private sprayHit(tp: [number, number]) {
+    const C = this.C, col = this.cans.color();
+    this.sprayStats.hits++;
+    const count = 3 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < count; i++) {
+      const v = Math.floor(Math.random() * SPLAT_VARIANTS);
+      const spr = this.add.image(0, 0, splatTex(this, col, v)).setDepth(C.sprite.depth + 0.4);
+      this.splats.push({ u: rnd(0.2, 0.8), v: rnd(0.14, 0.82), sc: [0.8, 1, 1.25, 1.5][Math.floor(Math.random() * 4)], flip: Math.random() < 0.5 ? -1 : 1, spr, age: 0 });
+    }
+    while (this.splats.length > 40) this.splats.shift()!.spr.destroy();
+    this.mist.puff(Phaser.Math.Clamp(this.bodyBox(C)[this.P.facing > 0 ? 0 : 2], tp[0] - 300, tp[0] + 600), tp[1], 6, col);
+    if (this.stun.cool <= 0 && !C.lying() && C.state !== 'hit') {
+      this.stun.t = STUN_TICKS; this.stun.cool = STUN_COOL; this.sprayStats.stuns++;
+      if (C.flashT > 0) { C.flashT = 0; C.sprite.clearTint(); }
+    }
+  }
+
+  private clearSplats() { for (const s of this.splats) s.spr.destroy(); this.splats = []; }
+
+  private renderSpray() {
+    const P = this.P, C = this.C;
+    if (this.heroS) {
+      if (this.sp) {
+        const sp = this.sp, c = this.clips[sp.steps[sp.i].clip], fi = Phaser.Math.Clamp(Math.floor(sp.cf), 0, c.frames.length - 1);
+        this.heroS.setVisible(true).setFrame(c.frames[fi]).setDisplayOrigin(c.anchor[0], c.anchor[1]).setPosition(Math.round(P.x), FY).setScale(P.facing, 1).setDepth(P.sprite.depth);
+        P.sprite.setVisible(false); P.smoke.setVisible(false);
+      } else { this.heroS.setVisible(false); P.sprite.setVisible(true); }
+    }
+    if (this.splats.length) {
+      const b = this.bodyBox(C), w = b[2] - b[0], h = b[3] - b[1], f = C.facing;
+      for (const s of this.splats) {
+        s.age++;
+        const x = f > 0 ? b[0] + s.u * w : b[2] - s.u * w, y = b[1] + s.v * h;
+        const pop = s.age < 7 ? 1 + 0.35 * (1 - s.age / 7) : 1;
+        s.spr.setPosition(Math.round(x), Math.round(y)).setScale(s.sc * pop * s.flip, s.sc * pop).setDepth(C.sprite.depth + 0.4).setVisible(C.sprite.visible);
+      }
+    }
+    if (this.outTxt) this.outTxt.setVisible(this.outT > 0).setAlpha(Math.min(1, this.outT / 20));
+  }
+
+  /** compact AEROSOL ARSENAL under the player's name (cans carried over from the street) */
+  private drawCans() {
+    const g = this.canG; if (!g) return;
+    g.clear();
+    const x0 = 24, y0 = 126, pitch = 24, n = this.cans.cans.length, tot = this.cans.total();
+    g.fillStyle(0x000000, 0.5).fillRoundedRect(x0 - 8, y0 - 8, n * pitch + 84, 46, 6).lineStyle(2, 0xf2c27a, 0.7).strokeRoundedRect(x0 - 8, y0 - 8, n * pitch + 84, 46, 6);
+    const cur = this.cans.cur();
+    this.cans.cans.forEach((a, i) => drawCan(g, x0 + i * pitch, y0, CAN_COLORS[i], a, i === cur, 1));
+    this.canTxt.setPosition(x0 + n * pitch + 4, y0 + 6).setText((Math.round(tot * 2) / 2).toFixed(1)).setColor(tot <= 0.001 ? '#ff5050' : '#fff');
   }
 
   // ------------------------------------------------------------------ debug / tests
   dbg() {
     const f = (x: Fighter) => ({ id: x.id, x: Math.round(x.x), bx: Math.round(x.bodyX()), hp: x.hp, lag: +x.lag.toFixed(1), state: x.state, move: x.move, fi: x.fi, facing: x.facing, rounds: x.rounds });
-    return { phase: this.phase, round: this.round, time: Math.ceil(ROUND_S - this.timeT / 60), lite: this.lite, rMin: this.rMin, rMax: this.rMax, P: f(this.P), C: f(this.C), fx: this.fx.stats(), FY };
+    return { phase: this.phase, round: this.round, time: Math.ceil(ROUND_S - this.timeT / 60), lite: this.lite, rMin: this.rMin, rMax: this.rMax, P: f(this.P), C: f(this.C), fx: this.fx.stats(), FY, spray: { active: !!this.sp, clip: this.sp ? this.sp.steps[this.sp.i].clip : null, cans: this.cans.cans.map((v) => +v.toFixed(2)), total: +this.cans.total().toFixed(2), stunT: this.stun.t, stunCool: this.stun.cool, splats: this.splats.length, ...this.sprayStats } };
   }
   dbgHit(who: 'c' | 'p', dmg: number) { const [A, D] = who === 'c' ? [this.P, this.C] : [this.C, this.P]; if (this.phase === 'intro') { this.phase = 'fight'; this.big.setVisible(false); } this.applyHit(A, D, null, dmg); }
+  dbgSpray() { if (this.phase === 'intro') { this.phase = 'fight'; this.big.setVisible(false); } this.buf.spray = 10; }
+  dbgCpu(on: boolean) { this.cpuOff = !on; }
+  dbgPlace(px: number, cx: number) { this.P.x = px; this.C.x = cx; }
   dbgFront() { this.fx.forceFront(); }
 }

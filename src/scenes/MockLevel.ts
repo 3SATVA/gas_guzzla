@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { Fighter, FY } from '../fight/Fighter';
 import { Inp, MoveSet, NO_INPUT } from '../fight/types';
 import { isTouch, liteMode } from '../game/lite';
+import { CAN_COLORS, drawCan } from '../game/spray';
 
 /**
  * MOCK street level for Seek (side-scrolling): walk, tag walls, paint security cameras, spray / kick drones,
@@ -16,15 +17,15 @@ const START_X = 300;
 const BOSS_X = 6000;          // crossing this brings in the CYLOBOT
 const CAM_Y = 72;             // security camera mount: 10% below the top of a 720 high screen
 const CAM_RANGE: [number, number] = [-120, 270];   // camera x minus hero x: 270 px = about 3 ft at Seek's scale
-const WALL_REACH = 160;       // how far from the wall spot SPRAY still starts a tag (she glides to the spot)
+const WALL_REACH: [number, number] = [-420, 200];   // hero x minus the wall's centre: SPRAY inside this walks her to the centre of the wall, then she tags
+const TAG_W = 800, TAG_H = 400, TAG_BANDS = 8, TAG_BASE_Y = 560;
 const GUARD_DROP = 360;       // 6 s without fighting: guard down
 const SPEED = 358 / 85;       // px per tick, = one walk stride per walk cycle (same as the fight walk)
-const CAN_COLORS = [0xff2d95, 0x1fd1e0, 0xa6e22e, 0xff8a1f, 0x8a4dff];
 
 interface Clip { frames: string[]; fps: number; loop: boolean; anchor: [number, number]; canvas: [number, number]; tips: ([number, number] | null)[] | null }
 interface Step { clip: string; speed?: number; ticks?: number; pp?: [number, number]; onStart?: () => void; onTick?: (t: number, step: Step) => void; onEnd?: () => void; t: number; f: number; started: boolean }
 type Mode = 'relaxed' | 'seq' | 'guard' | 'boss';
-interface Wall { spot: number; done: boolean; panel: Phaser.GameObjects.Image; tag?: Phaser.GameObjects.Image; kind: number }
+interface Wall { spot: number; cx: number; done: boolean; panel: Phaser.GameObjects.Image; tag?: Phaser.GameObjects.Image[]; kind: number }
 interface Cam { x: number; spr: Phaser.GameObjects.Sprite; paint: Phaser.GameObjects.Sprite; drips: Phaser.GameObjects.Graphics; state: 'scan' | 'painted'; f: number; ft: number; dir: number; blink: number; exposure: number; color: number; dripT: number }
 interface Drone { x: number; y: number; vx: number; vy: number; rot: number; spin: number; state: 'hover' | 'confused' | 'flee' | 'crash' | 'wreck' | 'gone'; t: number; spr: Phaser.GameObjects.Sprite; paint: Phaser.GameObjects.Sprite; painted: boolean; color: number; exposure: number; baseY: number; slot: number; fi: number; ft: number; seed: number; life: number }
 interface Mist { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: number; grow: number }
@@ -67,7 +68,9 @@ export class MockLevelScene extends Phaser.Scene {
   private C!: Fighter; private bossT = -1; private bossGo = false;
   private rng = 12345;
 
+  private carry: number[] | undefined; private approach: Wall | null = null;
   constructor() { super('Mock'); }
+  init(data: any) { this.carry = Array.isArray(data?.cans) ? data.cans : undefined; }
 
   private rand() { this.rng = (this.rng * 1664525 + 1013904223) >>> 0; return this.rng / 4294967296; }
   private rr(a: number, b: number) { return a + this.rand() * (b - a); }
@@ -112,7 +115,7 @@ export class MockLevelScene extends Phaser.Scene {
     const W = this.scale.width;
     this.mode = 'relaxed'; this.t = 0; this.acc = 0; this.hx = START_X; this.canOut = false; this.guardT = 0; this.guardAt = 0; this.pending = null;
     this.seq = []; this.seqDone = null; this.walls = []; this.cams = []; this.drones = []; this.mist = [];
-    this.waves.forEach((w) => (w.done = false)); this.cans = [1, 1, 1, 1, 1]; this.canUsed = 0; this.lockScroll = null; this.bossT = -1; this.bossGo = false;
+    this.waves.forEach((w) => (w.done = false)); this.cans = this.carry ? this.carry.slice() : [1, 1, 1, 1, 1]; this.canUsed = 0; this.approach = null; this.lockScroll = null; this.bossT = -1; this.bossGo = false;
     this.stats = { tags: 0, camsPainted: 0, dronesPainted: 0, dronesCrashed: 0 };
     this.buf = { punch: 0, kick: 0, spray: 0, act: 0 }; this.touch = []; this.touchPrev = {}; this.rng = 12345; this.move = 'idle'; this.clipName = 'idle_a'; this.cf = 0;
     this.clips = (this.cache.json.get('ml_clips') as any).clips;
@@ -125,7 +128,7 @@ export class MockLevelScene extends Phaser.Scene {
     // walls to tag
     [{ spot: 1000, kind: 0 }, { spot: 3000, kind: 1 }].forEach((w) => {
       const panel = this.add.image(w.spot + 200, 170, 'ml_wall').setOrigin(0.5, 0).setDepth(2);
-      this.walls.push({ spot: w.spot, kind: w.kind, done: false, panel });
+      this.walls.push({ spot: w.spot, cx: w.spot + 200, kind: w.kind, done: false, panel });
     });
     // security cameras on the back wall
     [1900, 3700, 5100].forEach((x, i) => this.cams.push(this.mkCam(x, i)));
@@ -186,22 +189,7 @@ export class MockLevelScene extends Phaser.Scene {
     this.warn?.setSize(W, 720);
   }
 
-  /** a spray can drawn in code at 1x logic pixels (14x30), shown at integer scale 2 */
-  private drawCan(g: Phaser.GameObjects.Graphics, x: number, y: number, color: number, amount: number, current: boolean) {
-    const s = 2, px = (cx: number, cy: number, w: number, h: number, c: number, a = 1) => g.fillStyle(c, a).fillRect(x + cx * s, y + cy * s, w * s, h * s);
-    const empty = amount <= 0.001;
-    const dim = amount < 0.999 ? 0.62 : 1;
-    px(5, 0, 4, 3, 0xe4e4e4, dim); px(6, 0, 2, 1, 0x222222, dim);        // nozzle
-    px(2, 3, 10, 6, 0x2a2e36, dim); px(2, 3, 10, 1, 0x4a505c, dim);       // cap
-    px(1, 9, 12, 21, empty ? 0x5d6168 : 0xb9bfc7, dim);                  // body
-    px(1, 9, 2, 21, 0x8b919a, dim); px(11, 9, 1, 21, 0xe5e9ee, dim);      // shade / highlight
-    px(3, 12, 8, 15, 0x14161a, dim);                                     // label window
-    const h = Math.round(15 * Phaser.Math.Clamp(amount, 0, 1));
-    if (h > 0) px(3, 27 - h, 8, h, color, dim);
-    if (amount > 0.001 && amount < 0.999) px(3, 12 + 7, 8, 1, 0xffffff, 0.45); // half mark
-    px(1, 28, 12, 2, 0x6a7078, dim);
-    if (current && !empty) { g.lineStyle(2, 0xffffff, 0.95).strokeRect(x - 3, y - 3, 14 * s + 6, 30 * s + 6); }
-  }
+  private drawCan(g: Phaser.GameObjects.Graphics, x: number, y: number, color: number, amount: number, current: boolean) { drawCan(g, x, y, color, amount, current, 2); }
 
   private drawHud() {
     const g = this.hudG; g.clear();
@@ -330,25 +318,48 @@ export class MockLevelScene extends Phaser.Scene {
     this.runSeq([this.S('guard_down', { speed: 3 })], () => { this.move = 'idle'; this.idleClip(); then?.(); });
   }
 
-  // ---- graffiti: turn_to_wall -> spray -> turn_away_toss
+  // ---- graffiti: walk to the centre of the wall -> turn_to_wall -> the full long squat spray -> turn_away_toss.
+  // The tag grows outward from her, equally to the left and right, in horizontal bands that the can hand favours
+  // (high strokes reveal the top, the squat reveals the bottom), and every band is finished by the end of the clip.
   private startTag(w: Wall) {
-    const spot = w.spot, x0 = this.hx;
+    const cx = w.cx, x0 = this.hx;
     const tagKey = 'mt_' + (w.kind === 0 ? 'seek_throwup_mike' : 'seek_3d_v3');
-    const SPRAY = 150;
-    const tag = this.add.image(spot - 90, 560, tagKey).setOrigin(0, 1).setDepth(3).setVisible(false);
-    w.tag = tag; w.done = true;
-    const tw = tag.width;
+    const tagX = cx - TAG_W / 2, tagTop = TAG_BASE_Y - TAG_H, bh = TAG_H / TAG_BANDS, half = TAG_W / 2;
+    const bands: Phaser.GameObjects.Image[] = [];
+    for (let i = 0; i < TAG_BANDS; i++) bands.push(this.add.image(tagX, tagTop, tagKey).setOrigin(0, 0).setDepth(3).setVisible(false));
+    w.tag = bands; w.done = true;
+    const hw = new Array(TAG_BANDS).fill(0), extra = new Array(TAG_BANDS).fill(0);
+    const show = () => bands.forEach((b, i) => {
+      const h = Math.round(Math.min(half, hw[i]) / 2) * 2;
+      if (h < 2) { b.setVisible(false); return; }
+      b.setVisible(true).setCrop(half - h, Math.round(i * bh), h * 2, Math.round(bh));
+    });
+    let prevP = 0;
     this.runSeq([
-      this.S('turn_to_wall', { speed: 1.5, onTick: (t) => { this.hx = x0 + (spot - x0) * Phaser.Math.Easing.Sine.InOut(Math.min(1, t / 26)); } }),
-      this.S('turn_to_wall', { pp: [66, 72], speed: 0.9, ticks: SPRAY,
-        onStart: () => tag.setVisible(true).setCrop(0, 0, 0, tag.height),
-        onTick: (t) => {
-          const p = Math.min(1, t / (SPRAY - 20));
-          tag.setCrop(0, 0, Math.round(tw * p), tag.height);
+      this.S('turn_to_wall', { speed: 1.5, onTick: (t) => { this.hx = x0 + (cx - x0) * Phaser.Math.Easing.Sine.InOut(Math.min(1, t / 26)); } }),
+      this.S('wall_spray_long', { speed: 1,
+        onTick: () => {
+          const c = this.clip('wall_spray_long');
+          const p = Math.min(1, this.cf / (c.frames.length - 1));
           const tp = this.tipWorld();
-          if (tp) { this.puff(tp[0], tp[1], 2); if (t % 2 === 0) this.puff(tag.x + tw * p, 560 - this.rr(30, 340), 1, true); }
-          this.consume(1 / SPRAY);
-        } }),
+          const base = Math.min(1, p / 0.8) * 0.55 * half;                 // everybody grows evenly...
+          const fin = Phaser.Math.Easing.Sine.InOut(Phaser.Math.Clamp((p - 0.8) / 0.18, 0, 1));
+          for (let i = 0; i < TAG_BANDS; i++) {
+            if (tp) { const d = (tp[1] - (tagTop + bh * (i + 0.5))) / 90; extra[i] += 1.1 * Math.exp(-d * d); }   // ...plus the band her hand is at
+            const v = Math.min(half, base + extra[i]);
+            hw[i] = v + (half - v) * fin;
+          }
+          show();
+          if (tp) {
+            this.puff(tp[0], tp[1], 2);
+            if (this.t % 3 === 0) {
+              const bi = Phaser.Math.Clamp(Math.floor((tp[1] - tagTop) / bh), 0, TAG_BANDS - 1), by = tagTop + bh * (bi + 0.5) + this.rr(-22, 22);
+              if (hw[bi] > 4 && hw[bi] < half - 2) { this.puff(cx - hw[bi], by, 1, true); this.puff(cx + hw[bi], by, 1, true); }
+            }
+          }
+          this.consume(Math.max(0, p - prevP)); prevP = p;
+        },
+        onEnd: () => { hw.fill(half); show(); } }),
       this.S('turn_away_toss', { speed: 2, onEnd: () => { this.canOut = false; this.stats.tags++; } }),
     ], () => {});
   }
@@ -401,7 +412,7 @@ export class MockLevelScene extends Phaser.Scene {
   /** SPRAY is context sensitive: a wall in reach, else a camera in range, else straight ahead */
   private sprayTarget(): { kind: 'wall'; w: Wall } | { kind: 'cam'; c: Cam } | { kind: 'fwd' } | null {
     if (this.totalCans() <= 0.001) return null;
-    const w = this.walls.find((q) => !q.done && Math.abs(q.spot - this.hx) <= WALL_REACH);
+    const w = this.walls.find((q) => !q.done && this.hx - q.cx >= WALL_REACH[0] && this.hx - q.cx <= WALL_REACH[1]);
     if (w) return { kind: 'wall', w };
     const c = this.cams.find((q) => q.state === 'scan' && q.x - this.hx >= CAM_RANGE[0] && q.x - this.hx <= CAM_RANGE[1]);
     if (c) return { kind: 'cam', c };
@@ -410,7 +421,7 @@ export class MockLevelScene extends Phaser.Scene {
   private doSpray() {
     const tg = this.sprayTarget();
     if (!tg) { this.flash('OUT OF CANS'); return; }
-    if (tg.kind === 'wall') this.startTag(tg.w); else if (tg.kind === 'cam') this.startCamSpray(tg.c); else this.startFwdSpray();
+    if (tg.kind === 'wall') this.approach = tg.w; else if (tg.kind === 'cam') this.startCamSpray(tg.c); else this.startFwdSpray();
   }
   private flashT = 0;
   private flash(s: string) { this.prompt.setText(s).setColor('#ff5050'); this.flashT = 60; }
@@ -588,7 +599,7 @@ export class MockLevelScene extends Phaser.Scene {
     if (T === 40) this.prompt.setText('\u26a0 WARNING  \u2022  CYLOBOT APPROACHING').setColor('#ff5050');
     if (T === 150) { this.banner.setVisible(true).setScale(1.6); this.tweens.add({ targets: this.banner, scale: 1, duration: 260, ease: 'Back.Out' }); this.cameras.main.shake(300, 0.006); }
     if (T === 150) this.prompt.setText('');
-    if (T === 330) { this.cameras.main.fadeOut(350, 0, 0, 0); this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.start('Fight', { fighter: 'seek', from: 'mock' })); }
+    if (T === 330) { this.cameras.main.fadeOut(350, 0, 0, 0); this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.start('Fight', { fighter: 'seek', from: 'mock', cans: this.cans.slice() })); }
   }
 
   // ------------------------------------------------------------------ main loop
@@ -613,7 +624,13 @@ export class MockLevelScene extends Phaser.Scene {
       this.F.x = this.hx;
     } else if (this.mode === 'relaxed') {
       const wantAtk = this.buf.punch > 0 || this.buf.kick > 0;
-      if (this.buf.spray > 0) { this.buf.spray = 0; this.doSpray(); }
+      if (this.approach) {
+        // walk to the centre of the wall first, then start the tag
+        const w = this.approach, d = w.cx - this.hx;
+        if (Math.abs(d) <= SPEED) { this.hx = w.cx; this.approach = null; this.move = 'idle'; this.startTag(w); }
+        else this.tickRelaxed(Math.sign(d));
+      }
+      else if (this.buf.spray > 0) { this.buf.spray = 0; this.doSpray(); }
       else if (this.buf.act > 0) { this.buf.act = 0; this.startCanToggle(); }
       else if (wantAtk) { const p = this.buf.punch > 0; this.raiseGuard(() => { if (p) this.buf.punch = 8; else this.buf.kick = 8; }); }
       else this.tickRelaxed(dir);
@@ -662,10 +679,10 @@ export class MockLevelScene extends Phaser.Scene {
     if (this.mode === 'relaxed' || this.mode === 'guard') {
       const tg = this.sprayTarget();
       if (this.totalCans() <= 0.001) s = 'OUT OF CANS';
-      else if (tg?.kind === 'wall') s = 'SPRAY: TAG THE WALL  (1 can)';
+      else if (tg?.kind === 'wall') s = 'SPRAY: TAG THE WALL  (1 can, she stands in the middle)';
       else if (tg?.kind === 'cam') s = 'SPRAY: PAINT THE CAMERA  (1/2 can)';
       else if (this.drones.some((d) => !d.painted && d.state === 'hover')) s = 'SPRAY the drones (1/2 can)  or  PUNCH / KICK them';
-      else if (this.walls.some((w) => !w.done && w.spot - this.hx > 0 && w.spot - this.hx < 420)) s = 'A blank wall \u2192';
+      else if (this.walls.some((w) => !w.done && w.cx - this.hx > 0 && w.cx - this.hx < 760)) s = 'A blank wall \u2192';
     }
     this.prompt.setText(s).setColor(s === 'OUT OF CANS' ? '#ff5050' : '#ffffff').setVisible(!!s);
   }
@@ -698,10 +715,11 @@ export class MockLevelScene extends Phaser.Scene {
       t: this.t, mode: this.mode, x: Math.round(this.hx), scrollX: this.scrollX, clip: this.clipName, fstate: this.F.state, fmove: this.F.move,
       canOut: this.canOut, cans: this.cans.map((v) => +v.toFixed(2)), total: +this.totalCans().toFixed(2), used: +this.canUsed.toFixed(2),
       guardIn: this.mode === 'guard' ? Math.max(0, GUARD_DROP - (this.t - this.guardAt)) : 0, seq: this.seq.map((s) => s.clip),
-      walls: this.walls.map((w) => ({ spot: w.spot, done: w.done })), cams: this.cams.map((c) => ({ x: c.x, state: c.state })),
+      walls: this.walls.map((w) => ({ spot: w.spot, cx: w.cx, done: w.done })), cams: this.cams.map((c) => ({ x: c.x, state: c.state })),
       drones: this.drones.map((d) => ({ x: Math.round(d.x), y: Math.round(d.y), state: d.state, painted: d.painted })),
-      stats: this.stats, boss: this.bossGo, bossT: this.bossT, target: (() => { const t = this.sprayTarget(); return t ? t.kind : null; })(), lite: this.lite,
+      approach: !!this.approach, cf: Math.round(this.cf), stats: this.stats, boss: this.bossGo, bossT: this.bossT, target: (() => { const t = this.sprayTarget(); return t ? t.kind : null; })(), lite: this.lite,
     };
   }
+  dbgRefill() { this.cans = [1, 1, 1, 1, 1]; }
   dbgTeleport(x: number) { if (this.mode === 'relaxed') this.hx = x; else if (this.mode === 'guard') this.F.x = this.hx = x; }
 }
