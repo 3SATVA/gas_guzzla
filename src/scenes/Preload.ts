@@ -163,6 +163,7 @@ export class PreloadScene extends Phaser.Scene {
     const fighter = q.get('fighter');
     if (start === 'level' || start === 'shop') this.scene.start('Level');
     else if (start === 'fight') this.scene.start('Fight', { fighter: fighter === 'seek' ? 'seek' : 'fade' });
+    else if (start === 'mock') this.scene.start('Mock');
     else if (q.get('fight') === '1') this.scene.start('Select', { mode: 'fight' });
     else if (start === 'select') this.scene.start('Select', { mode: 'drive' });
     else this.scene.start('Menu');

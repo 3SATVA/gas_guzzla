@@ -23,7 +23,7 @@ CHARS = {
     'fade': {'dir': FT + '/fade/v4', 'moves': {
         'idle': 'idle', 'walk_fwd': ('walk', 'walk_fwd'), 'walk_back': ('walk', 'walk_back'), 'jab': 'jab', 'kick': 'kick',
         'crouch': 'crouch', 'block': 'block', 'hit': 'hit', 'knockdown': 'knockdown', 'getup': 'getup'}},
-    'seek': {'dir': FT + '/seek/v3', 'moves': {
+    'seek': {'dir': os.environ.get('SEEK_SRC', FT + '/seek/v3'), 'moves': {
         'idle': ('idle', 'idle'), 'walk_fwd': ('walk2', 'walk_fwd'), 'walk_back': ('walk2', 'walk_back'), 'kick_b': ('kick_b', 'kick'),
         'kick': ('kick', 'kick'), 'crouch': 'crouch', 'block': 'block', 'hit': 'hit', 'knockdown': 'knockdown', 'getup': 'getup'}},
     'cylo': {'dir': FT + '/cylobot/v1', 'moves': {
@@ -238,8 +238,12 @@ def select_halves():
 
 
 if __name__ == '__main__':
+    only = sys.argv[1:]   # e.g. `build_fight_assets.py seek` (with SEEK_SRC=<v3 tree overlaid with the V1-face frames>) rebuilds one fighter
     for n, s in CHARS.items():
+        if only and n not in only:
+            continue
         for mode in ('full', 'lite'):
             build_char(n, s, mode)
-    copy_fx()
-    select_halves()
+    if not only:
+        copy_fx()
+        select_halves()

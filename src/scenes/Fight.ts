@@ -13,9 +13,10 @@ const overlap = (a: Box, b: Box) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] &&
 type Phase = 'intro' | 'fight' | 'ko' | 'over';
 interface TBtn { id: keyof Inp; x: number; y: number; r: number; g: Phaser.GameObjects.Arc; t: Phaser.GameObjects.Text }
 
-/** 1v1 vs the CPU Heavy Cylobot on the v6 alley: best of 3, MK-style HUD, keyboard + touch. */
+/** 1v1 vs the CPU CYLOBOT on the v6 alley: best of 3, MK-style HUD, keyboard + touch. */
 export class FightScene extends Phaser.Scene {
   private pid: FighterId = 'fade';
+  private from = '';
   private lite = false;
   private P!: Fighter; private C!: Fighter;
   private fx!: StageFx;
@@ -41,6 +42,7 @@ export class FightScene extends Phaser.Scene {
 
   init(data: any) {
     this.pid = data?.fighter === 'seek' ? 'seek' : 'fade';
+    this.from = data?.from === 'mock' ? 'mock' : '';
     this.registry.set('fighter', this.pid);
   }
 
@@ -134,7 +136,7 @@ export class FightScene extends Phaser.Scene {
     this.timerTxt = ui(this.add.text(W / 2, 43, '99', { fontFamily: 'monospace', fontSize: '44px', fontStyle: 'bold', color: '#f2c27a', stroke: '#000', strokeThickness: 7 }).setOrigin(0.5));
     this.big = ui(this.add.text(W / 2, 300, '', { fontFamily: 'monospace', fontSize: '96px', fontStyle: 'bold', color: '#f2d21b', stroke: '#300', strokeThickness: 12 }).setOrigin(0.5).setDepth(70));
     this.sub = ui(this.add.text(W / 2, 390, '', { fontFamily: 'monospace', fontSize: '34px', fontStyle: 'bold', color: '#ffffff', stroke: '#000', strokeThickness: 7 }).setOrigin(0.5).setDepth(70));
-    this.pickBtn = ui(this.add.text(W - 14, 108, 'PICK \u21a9', { fontFamily: 'monospace', fontSize: '18px', color: '#f2c27a', stroke: '#000', strokeThickness: 4 }).setOrigin(1, 0));
+    this.pickBtn = ui(this.add.text(W - 14, 108, this.from === 'mock' ? 'STREET \u21a9' : 'PICK \u21a9', { fontFamily: 'monospace', fontSize: '18px', color: '#f2c27a', stroke: '#000', strokeThickness: 4 }).setOrigin(1, 0));
     this.pickBtn.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.backToPick());
     const pn = this.pid === 'seek' ? 'KICK' : 'PUNCH', kn = this.pid === 'seek' ? 'HIGH KICK' : 'KICK';
     this.hint = ui(this.add.text(W / 2, 712, `\u2190\u2192/A D move   \u2193/S crouch   J/Z ${pn}   K/X ${kn}   L/C/SHIFT block   ESC pick`,
@@ -266,7 +268,7 @@ export class FightScene extends Phaser.Scene {
   private backToPick() {
     if ((this as any)._leaving) return; (this as any)._leaving = true;
     this.cameras.main.fadeOut(200, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => { (this as any)._leaving = false; this.scene.start('Select', { mode: 'fight' }); });
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => { (this as any)._leaving = false; this.scene.start(this.from === 'mock' ? 'Mock' : 'Select', this.from === 'mock' ? undefined : { mode: 'fight' }); });
   }
 
   // ------------------------------------------------------------------ CPU

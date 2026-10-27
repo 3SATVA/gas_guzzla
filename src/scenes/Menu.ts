@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-/** Main menu: DRIVE (the side-scrolling car game) or FIGHT (1v1 vs the Heavy Cylobot). */
+/** Main menu: DRIVE (the side-scrolling car game), FIGHT (1v1 vs the CYLOBOT) or STREET (Seek's mock street level). */
 export class MenuScene extends Phaser.Scene {
   private idx = 0;
   private items: Phaser.GameObjects.Text[] = [];
@@ -24,6 +24,7 @@ export class MenuScene extends Phaser.Scene {
     this.items = [
       this.add.text(640, 400, 'DRIVE', style).setOrigin(0.5),
       this.add.text(640, 490, 'FIGHT', style).setOrigin(0.5),
+      this.add.text(640, 580, 'STREET', style).setOrigin(0.5),
     ];
     this.items.forEach((t, i) => {
       t.setInteractive({ useHandCursor: true });
@@ -31,9 +32,9 @@ export class MenuScene extends Phaser.Scene {
       t.on('pointerup', () => { this.idx = i; this.go(); });
     });
     this.cursor = this.add.text(0, 0, '\u25B6', { ...style, fontSize: '44px' }).setOrigin(1, 0.5);
-    this.add.text(640, 640, '\u2191 \u2193  +  ENTER   /   TAP', { fontFamily: 'monospace', fontSize: '18px', fontStyle: 'bold', color: '#d9d2c4', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5);
+    this.add.text(640, 668, '\u2191 \u2193  +  ENTER   /   TAP', { fontFamily: 'monospace', fontSize: '18px', fontStyle: 'bold', color: '#d9d2c4', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5);
     const kb = this.input.keyboard!;
-    const mv = (d: number) => { this.idx = (this.idx + d + 2) % 2; this.refresh(); };
+    const mv = (d: number) => { this.idx = (this.idx + d + 3) % 3; this.refresh(); };
     kb.on('keydown-UP', () => mv(-1)); kb.on('keydown-W', () => mv(-1));
     kb.on('keydown-DOWN', () => mv(1)); kb.on('keydown-S', () => mv(1));
     kb.on('keydown-ENTER', () => this.go()); kb.on('keydown-SPACE', () => this.go());
@@ -55,6 +56,6 @@ export class MenuScene extends Phaser.Scene {
     this.registry.set('menu_idx', this.idx);
     this.cameras.main.fadeOut(250, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () =>
-      this.scene.start('Select', { mode: this.idx === 1 ? 'fight' : 'drive' }));
+      this.idx === 2 ? this.scene.start('Mock') : this.scene.start('Select', { mode: this.idx === 1 ? 'fight' : 'drive' }));
   }
 }

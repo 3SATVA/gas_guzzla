@@ -25,7 +25,7 @@ export const DEFS: Record<FighterId, FighterDef> = {
   // Seek has no punch art: PUNCH = her horizontal kick (kick_b), KICK = her high side kick
   seek: { name: 'SEEK', punch: 'kick_b', kick: 'kick', block: 'block', crouch: 'crouch', push: 95, shadowW: 136,
     dmg: { kick_b: 9, kick: 11 }, stag: { kick_b: 1, kick: 2 } },
-  // Heavy Cylobot: fast lunge punch only (no kick, no guns, no block art)
-  cylo: { name: 'HEAVY CYLOBOT', punch: 'punch', kick: null, block: null, crouch: null, push: 125, shadowW: 210,
+  // CYLOBOT: fast lunge punch only (no kick, no guns, no block art)
+  cylo: { name: 'CYLOBOT', punch: 'punch', kick: null, block: null, crouch: null, push: 125, shadowW: 210,
     dmg: { punch: 12 }, stag: { punch: 2 } },
 };

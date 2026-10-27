@@ -36,7 +36,7 @@ The output is fully static, and Vite uses `base: './'`, so it works from any pat
 
 ### Fight mode (main menu → FIGHT, or `?fight=1`)
 
-Pick Fade or Seek, then fight the CPU Heavy Cylobot, best of 3 (99 s rounds).
+Pick Fade or Seek, then fight the CPU CYLOBOT, best of 3 (99 s rounds).
 
 | | Keyboard | Touch |
 |---|---|---|
@@ -49,6 +49,21 @@ Pick Fade or Seek, then fight the CPU Heavy Cylobot, best of 3 (99 s rounds).
 | Back to pick | Esc | PICK ↩ |
 
 URL flags: `?scene=fight&fighter=fade|seek` jumps straight in, `?lite=1` / `?full=1` force the phone/desktop texture set, `?touch=1` shows the touch buttons on desktop, `?bag=front` spawns the rare front bag early.
+
+### STREET mock level (main menu → STREET, or `?scene=mock`)
+
+A side-scrolling street level starring Seek (MOCK / prototype). She starts with 5 spray cans (each a different colour). Graffiti costs 1 can, a camera 0.5, a drone spray 0.5. Walk far enough and the CYLOBOT 1v1 fight starts (hands off to the FIGHT mode; its PICK button then reads STREET ↩ and returns here).
+
+| | Keyboard | Touch |
+|---|---|---|
+| Walk | ← → / A D | ◀ ▶ |
+| Punch (Seek has no punch sprite, so this plays `kick_b`) | J / Z | PUNCH |
+| Kick | K / X | KICK |
+| SPRAY (context: wall tag, else camera in range, else straight-ahead spray at drones) | Space / L | SPRAY |
+| ACTION: draw / stow the can | E | CAN |
+| Menu | Esc | MENU ↩ |
+
+Guard: relaxed by default; the first punch/kick raises the guard, about 6 s without fighting lowers it. Assets are built by `python3 tools/build_mock_assets.py` from `brawler/v1/seek_sprites_v4` plus the camera/drone sheets. Scripted play-through with video: `node tools/mock_check.mjs` (dev server on `$BASE`).
 
 ## How it is put together
 

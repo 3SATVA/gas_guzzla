@@ -7,6 +7,7 @@ import { HudScene } from './scenes/Hud';
 import { ShopScene } from './scenes/Shop';
 import { MenuScene } from './scenes/Menu';
 import { FightScene } from './scenes/Fight';
+import { MockLevelScene } from './scenes/MockLevel';
 
 export const H = 720;
 /** Canvas height is always 720 (= 360 gameplay rows at 2x). The width follows the screen's aspect ratio
@@ -34,7 +35,7 @@ const game = new Phaser.Game({
   scale: { mode: Phaser.Scale.NONE, width: W0, height: H },
   input: { activePointers: 3 },
   fps: { target: 60 },
-  scene: [BootScene, PreloadScene, MenuScene, SelectScene, LevelScene, HudScene, ShopScene, FightScene],
+  scene: [BootScene, PreloadScene, MenuScene, SelectScene, LevelScene, HudScene, ShopScene, FightScene, MockLevelScene],
 });
 
 /** Fill the viewport: the canvas keeps its 2x pixel grid internally and is shown with nearest-neighbour CSS
