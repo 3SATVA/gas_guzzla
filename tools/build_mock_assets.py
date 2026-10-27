@@ -1,8 +1,10 @@
 """Pack the Seek mock-level art into public/assets/mock/ (pixel exact, no resampling).
 
-  seek/<full|lite>/  atlas of the 16 clips in brawler/v1/seek_sprites_v4 (trimmed, deduped, 2048 pages; includes the 10 s squat graffiti spray `wall_spray_long`) + clips.json
+  seek/<full|lite>/  atlas of the always-needed clips in brawler/v1/seek_sprites_v4 (13 clips: idle, walk_loop, guard, pocket, cam + fwd spray; walk_start was removed) + clips.json
                      (frames, fps, loop, anchor, and the can-nozzle 'tip' per frame for the spray clips).
                      lite = every 2nd frame of the 24 fps clips (phones, about half the GPU memory).
+  seek_wall/<full|lite>/ the 3 wall-tag clips (turn_to_wall, the 10 s squat spray `wall_spray_long`, turn_away_toss): about half of Seek's street memory, so the game
+                     loads it in the background only while a wall is near and unloads it after the tag
   seek_fwd/<full|lite>/  just the 3 forward-spray clips (the fight scene loads this instead of the whole street atlas)
   props/             camera (angle, ledoff, smash, broken) and CYLO drone (hover, hit, destroy) atlas + props.json
   tags/              the approved SEEK tags (seek_throwup_mike, seek_3d_v3), copied unchanged
@@ -90,9 +92,14 @@ TIP = {'cam_spray_raise': 'up', 'cam_spray_hold': 'up', 'cam_spray_return': 'up'
        'fwd_spray_return': 'right', 'turn_to_wall': 'right', 'wall_spray_long': 'can'}
 
 
-def build_seek(mode, only=None, sub='seek'):
+WALL = ('turn_to_wall', 'wall_spray_long', 'turn_away_toss')
+FWD = ('fwd_spray_raise', 'fwd_spray_hold', 'fwd_spray_return')
+
+
+def build_seek(mode, only=None, sub='seek', skip=()):
     man = json.load(open(S4 + '/manifest.json'))['clips']
     if only: man = {k: v for k, v in man.items() if k in only}
+    man = {k: v for k, v in man.items() if k not in skip}
     imgs, cache, clips = {}, {}, {}
     for name, c in man.items():
         files = [f'{S4}/{f}' if not f.startswith('/') else f for f in c['files']]
@@ -112,7 +119,7 @@ def build_seek(mode, only=None, sub='seek'):
         clips[name] = dict(frames=keys, fps=fps, loop=c['loop'], anchor=c['anchor'], canvas=c['canvas'], tips=tips if name in TIP else None)
     od = f'{OUT}/{sub}/{mode}'
     shutil.rmtree(od, ignore_errors=True)
-    mb = pack({k: t for k, t in imgs.values()}, od, 'mlseek')
+    mb = pack({k: t for k, t in imgs.values()}, od, 'mlwall' if sub == 'seek_wall' else 'mlseek')
     json.dump(dict(clips=clips, gpu_mb=mb), open(f'{od}/clips.json', 'w'))
     print(sub, mode, 'unique frames', len(imgs), 'GPU MB', mb)
 
@@ -162,8 +169,9 @@ if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     if '--wall-only' not in __import__('sys').argv:
         for m in ('full', 'lite'):
-            build_seek(m)
-            build_seek(m, only=('fwd_spray_raise', 'fwd_spray_hold', 'fwd_spray_return'), sub='seek_fwd')   # the CYLOBOT fight only needs the forward spray
+            build_seek(m, skip=WALL)
+            build_seek(m, only=WALL, sub='seek_wall')
+            build_seek(m, only=FWD, sub='seek_fwd')   # the FIGHT scene only needs the forward spray
         build_props()
     os.makedirs(OUT + '/tags', exist_ok=True)
     for t in ('seek_throwup_mike', 'seek_3d_v3'):
